@@ -22,6 +22,8 @@ from sklearn.linear_model import RidgeCV
 import zipfile
 gStoreTypes=['StoreType=a','StoreType=b','StoreType=c','StoreType=d']
 gPromoInterval=['PromoInterval=0', 'PromoInterval=Feb,May,Aug,Nov','PromoInterval=Jan,Apr,Jul,Oct', 'PromoInterval=Mar,Jun,Sept,Dec']
+gAssortment=['Assortment=a', 'Assortment=b','Assortment=c']
+gSingle=[]
 
 def loadData(trainfile,testfile,storefile):
   print('loading data ...')
@@ -61,7 +63,7 @@ def sanitizeTrain(train):
   return train
 
 def sanitizeTest(test):
-  print('sanitizing Test data ... completed')
+  print('sanitizing Test data ... ')
   test['Open'].replace('NaN',1,inplace=True)
   test['StateHoliday'].replace({'0':0,'a':1,'b':2,'c':3},inplace=True)
   test['Day']=train['Date'].apply(lambda x:x.day)
@@ -128,30 +130,33 @@ def feature_engg(train, test):
   print('starting feature engg ... completed')
   return train, test
 
-def GBModel(train,test):
+def GBModel(train,test,splitcriteria):
   train.reindex(np.random.permutation(train.index))
-  trA,trB,trC,trD=splitModels(train,gPromoInterval)
+  trA,trB,trC,trD=splitModels(train,splitcriteria)
   
+  print('starting Gradient Boosting ...')
   trA_X=trA.drop(['LogSales'],axis=1)
   trA_Y=trA['LogSales']
-  modelA=GradientBoostingRegressor(n_estimators=50,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
+  modelA=GradientBoostingRegressor(n_estimators=200,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
   modelA.fit(trA_X,trA_Y)
   
   trB_X=trB.drop(['LogSales'],axis=1)
   trB_Y=trB['LogSales']
-  modelB=GradientBoostingRegressor(n_estimators=50,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
+  modelB=GradientBoostingRegressor(n_estimators=200,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
   modelB.fit(trB_X,trB_Y)
   
   trC_X=trC.drop(['LogSales'],axis=1)
   trC_Y=trC['LogSales']
-  modelC=GradientBoostingRegressor(n_estimators=50,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
+  modelC=GradientBoostingRegressor(n_estimators=200,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
   modelC.fit(trC_X,trC_Y)
   
   trD_X=trD.drop(['LogSales'],axis=1)
   trD_Y=trD['LogSales']
-  modelD=GradientBoostingRegressor(n_estimators=50,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
+  modelD=GradientBoostingRegressor(n_estimators=200,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
   modelD.fit(trD_X,trD_Y)
 
+  print('completed Gradient Boosting ...')
+  print('predicting ...')
   teA,teB,teC,teD=splitModels(test,gPromoInterval)
   teA_y=getDF(modelA.predict(teA.drop(['Id'],axis=1)))
   teB_y=getDF(modelB.predict(teB.drop(['Id'],axis=1)))
@@ -159,8 +164,31 @@ def GBModel(train,test):
   teD_y=getDF(modelD.predict(teD.drop(['Id'],axis=1)))
   pd.concat([teA,teB,teC,teD])['Id'].to_csv('Inputs.csv')
   pd.concat([teA_y,teB_y,teC_y,teD_y]).to_csv('Predicts.csv')
+  print('predicting ... done')
 
-def getDF(y):
+def GBModel2(train,test,splitcriteria):
+  print('starting Gradient Boosting ...')
+  train.reindex(np.random.permutation(train.index))
+  trains=splitModels(train,splitcriteria)
+  models=[]
+  for train in trains:
+    trA_X=train.drop(['LogSales'],axis=1)
+    trA_Y=train['LogSales']
+    model=GradientBoostingRegressor(n_estimators=10,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
+    model.fit(trA_X,trA_Y)
+    models.append(model)
+  
+  print('completed Gradient Boosting ...')
+  print('predicting ...')
+  tests=splitModels(test,gPromoInterval)
+  preds=[]
+  for model, test in zip(models,tests):
+    preds.append(getDF(model.predict(test.drop(['Id'],axis=1))))
+  trains['Id'].to_csv('Inputs.csv')
+  preds.to_csv('Predicts.csv')
+  print('predicting ... done')
+
+def getDF(testY):
   t=[]
   for y in testY:
     t.append(math.exp(y))
@@ -198,11 +226,14 @@ def RidgeCVLinear(train,test):
 def splitModels(train,cond):
   #split based on storeType
   print('splitting models ...')
+  if len(cond)==0:
+    return [train]
   return [train[train[x]==1] for x in cond]
   print('splitting models ... completed')
 
 train,test,store=loadData('data/train.csv.zip', 'data/test.csv.zip','data/store.csv.zip')
 dtrain,dtest=sanitizeData(train,test,store)
 dtrain,dtest=feature_engg(dtrain,dtest)
-GBModel(dtrain,dtest)
+#GBModel(dtrain,dtest,gStoreType)
+GBModel2(dtrain,dtest,gSingle)
 #ridge=RidgeCVLinear(dtrain,dtest)
