@@ -52,6 +52,9 @@ def sanitizeData(train, test,store):
   #handle NaNs, do transformations and prepare the data for further processing.
   dtrain = pd.merge(xtrain,xstore,on='Store')
   dtest= pd.merge(xtest,xstore,on='Store')
+  #catcols=['DayOfWeek','Promo','Store','Month','Day','Year','StoreType']
+  #dtrain=encode_onehot(dtrain,catcols)
+  #dtest=encode_onehot(dtest,catcols)
   print('sanitizing data ... completed')
   return dtrain, dtest
 
@@ -90,6 +93,7 @@ def sanitizeStore(store):
   store['LogCompDays']=store.apply(func=getDays,axis=1)
   print('sanitizing Store data ... completed')
   return encode_onehot(store,['StoreType','Assortment','PromoInterval'])
+  #return store
 
 def getDays(row):
   month=row['CompetitionOpenSinceMonth']
@@ -129,8 +133,8 @@ def feature_engg(train, test):
   #catcols=['DayOfWeek','Promo','Store','Month','Day','Year','StoreType']
   #dropcols=['Promo2', 'CompetitionOpenSinceMonth', 'CompetitionOpenSinceYear','Promo2SinceWeek','Promo2SinceYear','PromoInterval','Date','Open','StateHoliday','SchoolHoliday','Assortment','CompetitionDistance']
   #The above two lines were from previous run which fetched the highest score till date. So copying here for reference.
-  train['IsPromo2On']=train.apply(func=getPromo2,axis=1)
-  test['IsPromo2On']=test.apply(func=getPromo2,axis=1)
+  #train['IsPromo2On']=train.apply(func=getPromo2,axis=1)
+  #test['IsPromo2On']=test.apply(func=getPromo2,axis=1)
   dropcols=['StateHoliday','Day','Month','Year','Promo2SinceWeek','Promo2SinceYear','DayOfWeek','Store','Open','Date','CompetitionDistance','CompetitionOpenSinceMonth','CompetitionOpenSinceYear']
   traindropcols=['Sales','Customers']
   train.drop(traindropcols,axis=1,inplace=True)
@@ -148,42 +152,6 @@ def getPromo2(row):
   return 0
 
 
-def GBModel(train,test,splitcriteria):
-  train.reindex(np.random.permutation(train.index))
-  trA,trB,trC,trD=splitModels(train,splitcriteria)
-  
-  print('starting Gradient Boosting ...')
-  trA_X=trA.drop(['LogSales'],axis=1)
-  trA_Y=trA['LogSales']
-  modelA=GradientBoostingRegressor(n_estimators=200,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
-  modelA.fit(trA_X,trA_Y)
-  
-  trB_X=trB.drop(['LogSales'],axis=1)
-  trB_Y=trB['LogSales']
-  modelB=GradientBoostingRegressor(n_estimators=200,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
-  modelB.fit(trB_X,trB_Y)
-  
-  trC_X=trC.drop(['LogSales'],axis=1)
-  trC_Y=trC['LogSales']
-  modelC=GradientBoostingRegressor(n_estimators=200,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
-  modelC.fit(trC_X,trC_Y)
-  
-  trD_X=trD.drop(['LogSales'],axis=1)
-  trD_Y=trD['LogSales']
-  modelD=GradientBoostingRegressor(n_estimators=200,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
-  modelD.fit(trD_X,trD_Y)
-
-  print('completed Gradient Boosting ...')
-  print('predicting ...')
-  teA,teB,teC,teD=splitModels(test,gPromoInterval)
-  teA_y=getDF(modelA.predict(teA.drop(['Id'],axis=1)))
-  teB_y=getDF(modelB.predict(teB.drop(['Id'],axis=1)))
-  teC_y=getDF(modelC.predict(teC.drop(['Id'],axis=1)))
-  teD_y=getDF(modelD.predict(teD.drop(['Id'],axis=1)))
-  pd.concat([teA,teB,teC,teD])['Id'].to_csv('Inputs.csv')
-  pd.concat([teA_y,teB_y,teC_y,teD_y]).to_csv('Predicts.csv')
-  print('predicting ... done')
-
 def GBModel2(train,test,splitcriteria):
   train.reindex(np.random.permutation(train.index))
   trains=splitModels(train,splitcriteria)
@@ -191,8 +159,10 @@ def GBModel2(train,test,splitcriteria):
   print(splitcriteria)
   models=[]
   params=''
+  # reference
+  #GradientBoostingRegressor(n_estimators=350, max_depth=9, max_features='auto',min_samples_split=7,min_samples_leaf=7)
   for train in trains:
-    model=GradientBoostingRegressor(n_estimators=350,max_features='sqrt',learning_rate=0.05,subsample=0.8,min_samples_split=7,min_samples_leaf=7,max_depth=10,verbose=1)
+    model=GradientBoostingRegressor(n_estimators=350,max_features='auto',min_samples_split=7,min_samples_leaf=7,max_depth=9,verbose=1)
     trA_X=train.drop(['LogSales'],axis=1)
     trA_Y=train['LogSales']
     model.fit(trA_X,trA_Y)
@@ -201,7 +171,7 @@ def GBModel2(train,test,splitcriteria):
   
   print('completed Gradient Boosting ...')
   print('predicting ...')
-  tests=splitModels(test,gPromoInterval)
+  tests=splitModels(test,splitcriteria)
   preds=[]
   for model, test in zip(models,tests):
     preds.append(getDF(model.predict(test.drop(['Id'],axis=1))))
