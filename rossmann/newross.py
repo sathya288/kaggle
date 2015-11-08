@@ -21,6 +21,7 @@ from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import RidgeCV
 import zipfile
 import time 
+from time import strftime
 
 gStoreTypes=['StoreType=a','StoreType=b','StoreType=c','StoreType=d']
 gPromoInterval=['PromoInterval=0', 'PromoInterval=Feb,May,Aug,Nov','PromoInterval=Jan,Apr,Jul,Oct', 'PromoInterval=Mar,Jun,Sept,Dec']
@@ -123,14 +124,29 @@ def encode_onehot(df, cols):
   return df
 
 def feature_engg(train, test):
-  print('starting feature engg ...')
+  print('feature engg ...')
   #columns to be dropped based on simple correlation
-  traindropcols=['Sales','CompetitionDistance','Customers','Date','CompetitionOpenSinceMonth','CompetitionOpenSinceYear']
-  testdropcols=['Date','CompetitionDistance','CompetitionOpenSinceMonth','CompetitionOpenSinceYear']
+  #catcols=['DayOfWeek','Promo','Store','Month','Day','Year','StoreType']
+  #dropcols=['Promo2', 'CompetitionOpenSinceMonth', 'CompetitionOpenSinceYear','Promo2SinceWeek','Promo2SinceYear','PromoInterval','Date','Open','StateHoliday','SchoolHoliday','Assortment','CompetitionDistance']
+  #The above two lines were from previous run which fetched the highest score till date. So copying here for reference.
+  train['IsPromo2On']=train.apply(func=getPromo2,axis=1)
+  test['IsPromo2On']=test.apply(func=getPromo2,axis=1)
+  dropcols=['StateHoliday','Day','Month','Year','Promo2SinceWeek','Promo2SinceYear','DayOfWeek','Store','Open','Date','CompetitionDistance','CompetitionOpenSinceMonth','CompetitionOpenSinceYear']
+  traindropcols=['Sales','Customers']
   train.drop(traindropcols,axis=1,inplace=True)
-  test.drop(testdropcols,axis=1,inplace=True)
-  print('starting feature engg ... completed')
+  train.drop(dropcols,axis=1,inplace=True)
+  test.drop(dropcols,axis=1,inplace=True)
+  print('feature engg ... completed')
   return train, test
+
+def getPromo2(row):
+  m=row['Date'].month
+  months={0:'PromoInterval=0', 1:'PromoInterval=Jan,Apr,Jul,Oct',4:'PromoInterval=Jan,Apr,Jul,Oct',7:'PromoInterval=Jan,Apr,Jul,Oct',10:'PromoInterval=Jan,Apr,Jul,Oct',2:'PromoInterval=Feb,May,Aug,Nov',5:'PromoInterval=Feb,May,Aug,Nov',8:'PromoInterval=Feb,May,Aug,Nov',11:'PromoInterval=Feb,May,Aug,Nov',3:'PromoInterval=Mar,Jun,Sept,Dec',6:'PromoInterval=Mar,Jun,Sept,Dec',9:'PromoInterval=Mar,Jun,Sept,Dec',12:'PromoInterval=Mar,Jun,Sept,Dec'}
+  if row['Promo2']==1 and row[months[m]]==1:
+    if ((row['Date'].year < row['Promo2SinceYear']) or (row['Date'].week > row['Promo2SinceWeek'])):
+      return 1
+  return 0
+
 
 def GBModel(train,test,splitcriteria):
   train.reindex(np.random.permutation(train.index))
@@ -174,12 +190,14 @@ def GBModel2(train,test,splitcriteria):
   print('starting Gradient Boosting ...')
   print(splitcriteria)
   models=[]
+  params=''
   for train in trains:
+    model=GradientBoostingRegressor(n_estimators=350,max_features='sqrt',learning_rate=0.05,subsample=0.8,min_samples_split=7,min_samples_leaf=7,max_depth=10,verbose=1)
     trA_X=train.drop(['LogSales'],axis=1)
     trA_Y=train['LogSales']
-    model=GradientBoostingRegressor(n_estimators=500,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
     model.fit(trA_X,trA_Y)
     models.append(model)
+    params=model.get_params()
   
   print('completed Gradient Boosting ...')
   print('predicting ...')
@@ -187,8 +205,11 @@ def GBModel2(train,test,splitcriteria):
   preds=[]
   for model, test in zip(models,tests):
     preds.append(getDF(model.predict(test.drop(['Id'],axis=1))))
-  pd.concat(tests)['Id'].to_csv('Inputs'+str(time.time())+'.csv')
-  pd.concat(preds).to_csv('Predicts.csv'+str(time.time())+'.csv')
+  st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
+  fname='Inputs'+st+'.csv'
+  pd.concat(tests)['Id'].to_csv(fname)
+  pd.DataFrame([params]).to_csv(fname,mode='a')
+  pd.concat(preds).to_csv('Predict_'+fname)
   print('predicting ... done')
 
 def getDF(testY):
@@ -238,5 +259,5 @@ train,test,store=loadData('data/train.csv.zip', 'data/test.csv.zip','data/store.
 dtrain,dtest=sanitizeData(train,test,store)
 dtrain,dtest=feature_engg(dtrain,dtest)
 #GBModel(dtrain,dtest,gStoreType)
-GBModel2(dtrain,dtest,gStoreType)
+GBModel2(dtrain,dtest,gStoreTypes)
 #ridge=RidgeCVLinear(dtrain,dtest)
