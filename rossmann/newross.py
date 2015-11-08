@@ -20,6 +20,8 @@ from sklearn.preprocessing import Imputer
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import RidgeCV
 import zipfile
+import time 
+
 gStoreTypes=['StoreType=a','StoreType=b','StoreType=c','StoreType=d']
 gPromoInterval=['PromoInterval=0', 'PromoInterval=Feb,May,Aug,Nov','PromoInterval=Jan,Apr,Jul,Oct', 'PromoInterval=Mar,Jun,Sept,Dec']
 gAssortment=['Assortment=a', 'Assortment=b','Assortment=c']
@@ -167,14 +169,15 @@ def GBModel(train,test,splitcriteria):
   print('predicting ... done')
 
 def GBModel2(train,test,splitcriteria):
-  print('starting Gradient Boosting ...')
   train.reindex(np.random.permutation(train.index))
   trains=splitModels(train,splitcriteria)
+  print('starting Gradient Boosting ...')
+  print(splitcriteria)
   models=[]
   for train in trains:
     trA_X=train.drop(['LogSales'],axis=1)
     trA_Y=train['LogSales']
-    model=GradientBoostingRegressor(n_estimators=10,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
+    model=GradientBoostingRegressor(n_estimators=500,max_depth=9,min_samples_leaf=7,min_samples_split=7,warm_start=True)
     model.fit(trA_X,trA_Y)
     models.append(model)
   
@@ -184,8 +187,8 @@ def GBModel2(train,test,splitcriteria):
   preds=[]
   for model, test in zip(models,tests):
     preds.append(getDF(model.predict(test.drop(['Id'],axis=1))))
-  trains['Id'].to_csv('Inputs.csv')
-  preds.to_csv('Predicts.csv')
+  pd.concat(tests)['Id'].to_csv('Inputs'+str(time.time())+'.csv')
+  pd.concat(preds).to_csv('Predicts.csv'+str(time.time())+'.csv')
   print('predicting ... done')
 
 def getDF(testY):
@@ -235,5 +238,5 @@ train,test,store=loadData('data/train.csv.zip', 'data/test.csv.zip','data/store.
 dtrain,dtest=sanitizeData(train,test,store)
 dtrain,dtest=feature_engg(dtrain,dtest)
 #GBModel(dtrain,dtest,gStoreType)
-GBModel2(dtrain,dtest,gSingle)
+GBModel2(dtrain,dtest,gStoreType)
 #ridge=RidgeCVLinear(dtrain,dtest)
