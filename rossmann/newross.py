@@ -45,38 +45,32 @@ def loadData(trainfile,testfile,storefile):
 def sanitizeData(train, test,store):
 
   print('sanitizing data ...')
-  xtrain=sanitizeTrain(train)
+  xtrain=sanitizeInputs(train)
   xstore=sanitizeStore(store)
-  xtest=sanitizeTest(test)
+  xtest=sanitizeInputs(test)
 
   #handle NaNs, do transformations and prepare the data for further processing.
-  dtrain = pd.merge(xtrain,xstore,on='Store')
-  dtest= pd.merge(xtest,xstore,on='Store')
+  dtrain = pd.merge(xtrain,xstore,how='inner',on='Store')
+  dtest= pd.merge(xtest,xstore,how='inner',on='Store')
   #catcols=['DayOfWeek','Promo','Store','Month','Day','Year','StoreType']
-  #dtrain=encode_onehot(dtrain,catcols)
-  #dtest=encode_onehot(dtest,catcols)
+  catcols=['DayOfWeek','Promo','Store','Month','Day','Year']
+  dtrain=encode_onehot(dtrain,catcols)
+  dtest=encode_onehot(dtest,catcols)
   print('sanitizing data ... completed')
   return dtrain, dtest
 
-def sanitizeTrain(train):
+def sanitizeInputs(train):
   print('sanitizing Training data ... ')
+  train['Open'].replace('NaN',1,inplace=True)
   train['Day']=train['Date'].apply(lambda x:x.day)
   train['Month']=train['Date'].apply(lambda x:x.month)
   train['Year']=train['Date'].apply(lambda x:x.year)
-  train['LogSales']=train['Sales'].apply(lambda x:math.log(x+1))
+  if 'Sales' in train.columns:
+    train=train[train['Sales']>0]
+    train['LogSales']=train['Sales'].apply(lambda x:math.log(x+1))
   train['StateHoliday'].replace({'0':0,'a':1,'b':2,'c':3},inplace=True)
   print('sanitizing Training data ... completed')
   return train
-
-def sanitizeTest(test):
-  print('sanitizing Test data ... ')
-  test['Open'].replace('NaN',1,inplace=True)
-  test['StateHoliday'].replace({'0':0,'a':1,'b':2,'c':3},inplace=True)
-  test['Day']=train['Date'].apply(lambda x:x.day)
-  test['Month']=train['Date'].apply(lambda x:x.month)
-  test['Year']=train['Date'].apply(lambda x:x.year)
-  print('sanitizing Test data ... completed')
-  return test
 
 def sanitizeStore(store):
   print('sanitizing Store data ... ')
@@ -93,6 +87,7 @@ def sanitizeStore(store):
   store['LogCompDays']=store.apply(func=getDays,axis=1)
   print('sanitizing Store data ... completed')
   return encode_onehot(store,['StoreType','Assortment','PromoInterval'])
+  #return encode_onehot(store,['StoreType'])
   #return store
 
 def getDays(row):
@@ -135,7 +130,7 @@ def feature_engg(train, test):
   #The above two lines were from previous run which fetched the highest score till date. So copying here for reference.
   #train['IsPromo2On']=train.apply(func=getPromo2,axis=1)
   #test['IsPromo2On']=test.apply(func=getPromo2,axis=1)
-  dropcols=['StateHoliday','Day','Month','Year','Promo2SinceWeek','Promo2SinceYear','DayOfWeek','Store','Open','Date','CompetitionDistance','CompetitionOpenSinceMonth','CompetitionOpenSinceYear']
+  dropcols=['Day','Month','Year','Open','Date','CompetitionDistance','CompetitionOpenSinceMonth','CompetitionOpenSinceYear']
   traindropcols=['Sales','Customers']
   train.drop(traindropcols,axis=1,inplace=True)
   train.drop(dropcols,axis=1,inplace=True)
@@ -153,34 +148,31 @@ def getPromo2(row):
 
 
 def GBModel2(train,test,splitcriteria):
-  train.reindex(np.random.permutation(train.index))
   trains=splitModels(train,splitcriteria)
+  tests=splitModels(test,splitcriteria)
   print('starting Gradient Boosting ...')
   print(splitcriteria)
   models=[]
   params=''
+  preds=[]
+  inp=[]
   # reference
   #GradientBoostingRegressor(n_estimators=350, max_depth=9, max_features='auto',min_samples_split=7,min_samples_leaf=7)
-  for train in trains:
-    model=GradientBoostingRegressor(n_estimators=350,max_features='auto',min_samples_split=7,min_samples_leaf=7,max_depth=9,verbose=1)
-    trA_X=train.drop(['LogSales'],axis=1)
+  for train,test in zip(trains,tests):
+    model=GradientBoostingRegressor(n_estimators=150,max_features='auto',min_samples_split=7,min_samples_leaf=7,max_depth=9,verbose=1)
+    trA_X=train.drop('LogSales',axis=1)
     trA_Y=train['LogSales']
     model.fit(trA_X,trA_Y)
-    models.append(model)
+    preds.append(getDF(model.predict(test.drop('Id',axis=1))))
+    inp.append(test['Id'])
     params=model.get_params()
   
   print('completed Gradient Boosting ...')
-  print('predicting ...')
-  tests=splitModels(test,splitcriteria)
-  preds=[]
-  for model, test in zip(models,tests):
-    preds.append(getDF(model.predict(test.drop(['Id'],axis=1))))
   st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
   fname='Inputs'+st+'.csv'
-  pd.concat(tests)['Id'].to_csv(fname)
+  pd.concat(inp).to_csv(fname)
   pd.DataFrame([params]).to_csv(fname,mode='a')
   pd.concat(preds).to_csv('Predict_'+fname)
-  print('predicting ... done')
 
 def getDF(testY):
   t=[]
@@ -205,7 +197,7 @@ def RidgeCVLinear(train,test):
   print('starting RidgeCVLinear ...')
   ridge=RidgeCV(normalize=True,cv=5)
   train.reindex(np.random.permutation(train.index))
-  tr_X=train.drop(['LogSales'],axis=1)
+  tr_X=train.drop('LogSales',axis=1)
   tr_Y=train['LogSales']
   cutoff=math.floor(0.7*tr_Y.size)
   ridge.fit(tr_X[:cutoff],tr_Y[:cutoff])
@@ -228,6 +220,8 @@ def splitModels(train,cond):
 train,test,store=loadData('data/train.csv.zip', 'data/test.csv.zip','data/store.csv.zip')
 dtrain,dtest=sanitizeData(train,test,store)
 dtrain,dtest=feature_engg(dtrain,dtest)
+print(dtrain.columns)
+print(dtest.columns)
 #GBModel(dtrain,dtest,gStoreType)
 GBModel2(dtrain,dtest,gStoreTypes)
 #ridge=RidgeCVLinear(dtrain,dtest)
