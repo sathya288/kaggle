@@ -53,11 +53,31 @@ def sanitizeData(train, test,store):
   dtrain = pd.merge(xtrain,xstore,how='inner',on='Store')
   dtest= pd.merge(xtest,xstore,how='inner',on='Store')
   #catcols=['DayOfWeek','Promo','Store','Month','Day','Year','StoreType']
-  catcols=['DayOfWeek','Promo','Store','Month','Day','Year']
-  dtrain=encode_onehot(dtrain,catcols)
-  dtest=encode_onehot(dtest,catcols)
+  #catcols=['Day','Month','Year','Promo','Store']
+  #dtrain=encode_onehot(dtrain,catcols)
+  #dtest=encode_onehot(dtest,catcols)
   print('sanitizing data ... completed')
-  return dtrain, dtest
+  print('feature engg ...')
+  #columns to be dropped based on simple correlation
+  #catcols=['DayOfWeek','Promo','Store','Month','Day','Year','StoreType']
+  #dropcols=['Promo2', 'CompetitionOpenSinceMonth', 'CompetitionOpenSinceYear','Promo2SinceWeek','Promo2SinceYear','PromoInterval','Date','Open','StateHoliday','SchoolHoliday','Assortment','CompetitionDistance']
+  #The above two lines were from previous run which fetched the highest score till date. So copying here for reference.
+  dtrain['IsPromo2On']=dtrain.apply(func=getPromo2,axis=1)
+  dtest['IsPromo2On']=dtest.apply(func=getPromo2,axis=1)
+  dropcols=['Store','IsPromo2On','StateHoliday','SchoolHoliday','Promo2','Open','Date','CompetitionDistance']
+  traindropcols=['Sales','Customers']
+  dtrain.drop(traindropcols,axis=1,inplace=True)
+  dtrain.drop(dropcols,axis=1,inplace=True)
+  dtest.drop(dropcols,axis=1,inplace=True)
+  dtrain.drop(gPromoInterval,axis=1,inplace=True)
+  dtest.drop(gPromoInterval,axis=1,inplace=True)
+  dtrain.drop(gAssortment,axis=1,inplace=True)
+  dtest.drop(gAssortment,axis=1,inplace=True)
+  #dtrain.drop(gStoreTypes,axis=1,inplace=True)
+  #dtest.drop(gStoreTypes,axis=1,inplace=True)
+  print('feature engg ... completed')
+  #return encode_onehot(dtrain,['IsPromo2On']), encode_onehot(dtest,['IsPromo2On'])
+  return dtrain,dtest
 
 def sanitizeInputs(train):
   print('sanitizing Training data ... ')
@@ -67,10 +87,10 @@ def sanitizeInputs(train):
   train['Year']=train['Date'].apply(lambda x:x.year)
   if 'Sales' in train.columns:
     train=train[train['Sales']>0]
-    train['LogSales']=train['Sales'].apply(lambda x:math.log(x+1))
+    train['LogSales']=train['Sales'].apply(lambda x:math.log(x))
   train['StateHoliday'].replace({'0':0,'a':1,'b':2,'c':3},inplace=True)
   print('sanitizing Training data ... completed')
-  return train
+  return encode_onehot(train,['DayOfWeek','Day','Month','Year','Store','SchoolHoliday','StateHoliday'])
 
 def sanitizeStore(store):
   print('sanitizing Store data ... ')
@@ -86,7 +106,7 @@ def sanitizeStore(store):
   store['LogCompDist']=store['CompetitionDistance'].apply(lambda x:math.log(x))
   store['LogCompDays']=store.apply(func=getDays,axis=1)
   print('sanitizing Store data ... completed')
-  return encode_onehot(store,['StoreType','Assortment','PromoInterval'])
+  return encode_onehot(store,['Store','StoreType','Assortment','PromoInterval'])
   #return encode_onehot(store,['StoreType'])
   #return store
 
@@ -122,22 +142,6 @@ def encode_onehot(df, cols):
   df = df.join(vec_data)
   return df
 
-def feature_engg(train, test):
-  print('feature engg ...')
-  #columns to be dropped based on simple correlation
-  #catcols=['DayOfWeek','Promo','Store','Month','Day','Year','StoreType']
-  #dropcols=['Promo2', 'CompetitionOpenSinceMonth', 'CompetitionOpenSinceYear','Promo2SinceWeek','Promo2SinceYear','PromoInterval','Date','Open','StateHoliday','SchoolHoliday','Assortment','CompetitionDistance']
-  #The above two lines were from previous run which fetched the highest score till date. So copying here for reference.
-  #train['IsPromo2On']=train.apply(func=getPromo2,axis=1)
-  #test['IsPromo2On']=test.apply(func=getPromo2,axis=1)
-  dropcols=['Day','Month','Year','Open','Date','CompetitionDistance','CompetitionOpenSinceMonth','CompetitionOpenSinceYear']
-  traindropcols=['Sales','Customers']
-  train.drop(traindropcols,axis=1,inplace=True)
-  train.drop(dropcols,axis=1,inplace=True)
-  test.drop(dropcols,axis=1,inplace=True)
-  print('feature engg ... completed')
-  return train, test
-
 def getPromo2(row):
   m=row['Date'].month
   months={0:'PromoInterval=0', 1:'PromoInterval=Jan,Apr,Jul,Oct',4:'PromoInterval=Jan,Apr,Jul,Oct',7:'PromoInterval=Jan,Apr,Jul,Oct',10:'PromoInterval=Jan,Apr,Jul,Oct',2:'PromoInterval=Feb,May,Aug,Nov',5:'PromoInterval=Feb,May,Aug,Nov',8:'PromoInterval=Feb,May,Aug,Nov',11:'PromoInterval=Feb,May,Aug,Nov',3:'PromoInterval=Mar,Jun,Sept,Dec',6:'PromoInterval=Mar,Jun,Sept,Dec',9:'PromoInterval=Mar,Jun,Sept,Dec',12:'PromoInterval=Mar,Jun,Sept,Dec'}
@@ -147,7 +151,7 @@ def getPromo2(row):
   return 0
 
 
-def GBModel2(train,test,splitcriteria):
+def GBModel2(train,test,splitcriteria,modelparams):
   trains=splitModels(train,splitcriteria)
   tests=splitModels(test,splitcriteria)
   print('starting Gradient Boosting ...')
@@ -158,21 +162,27 @@ def GBModel2(train,test,splitcriteria):
   inp=[]
   # reference
   #GradientBoostingRegressor(n_estimators=350, max_depth=9, max_features='auto',min_samples_split=7,min_samples_leaf=7)
-  for train,test in zip(trains,tests):
-    model=GradientBoostingRegressor(n_estimators=150,max_features='auto',min_samples_split=7,min_samples_leaf=7,max_depth=9,verbose=1)
+  for train,test,cond in zip(trains,tests,splitcriteria):
+    train.drop(splitcriteria,axis=1)
+    test.drop(splitcriteria,axis=1)
+    model=GradientBoostingRegressor()
+    model.set_params(**modelparams)
     trA_X=train.drop('LogSales',axis=1)
     trA_Y=train['LogSales']
     model.fit(trA_X,trA_Y)
     preds.append(getDF(model.predict(test.drop('Id',axis=1))))
     inp.append(test['Id'])
     params=model.get_params()
+    plotFeatureImportance(model,trA_X,cond)
   
   print('completed Gradient Boosting ...')
   st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
   fname='Inputs'+st+'.csv'
   pd.concat(inp).to_csv(fname)
+  pd.DataFrame([train.columns]).to_csv(fname,mode='a')
   pd.DataFrame([params]).to_csv(fname,mode='a')
   pd.concat(preds).to_csv('Predict_'+fname)
+  return tests,preds
 
 def getDF(testY):
   t=[]
@@ -217,11 +227,30 @@ def splitModels(train,cond):
   return [train[train[x]==1] for x in cond]
   print('splitting models ... completed')
 
+def plotFeatureImportance(clf,df,suffix='x'):
+  ###############################################################################
+  # Plot feature importance
+  feature_importance = clf.feature_importances_
+  # make importances relative to max importance
+  feature_importance = 100.0 * (feature_importance / feature_importance.max())
+  sorted_idx = np.argsort(feature_importance)
+  pos = np.arange(sorted_idx.shape[0]) + .5
+  plt.subplot(1, 2, 2)
+  plt.barh(pos, feature_importance[sorted_idx], align='center')
+  plt.yticks(pos, df.columns[sorted_idx])
+  plt.xlabel('Relative Importance')
+  plt.title('Variable Importance Rossman Dataset')
+  ffile='variableImp'+suffix+'.png'
+  plt.savefig(ffile)
+  plt.clf()
+
+
 train,test,store=loadData('data/train.csv.zip', 'data/test.csv.zip','data/store.csv.zip')
 dtrain,dtest=sanitizeData(train,test,store)
-dtrain,dtest=feature_engg(dtrain,dtest)
 print(dtrain.columns)
 print(dtest.columns)
-#GBModel(dtrain,dtest,gStoreType)
-GBModel2(dtrain,dtest,gStoreTypes)
+params={'n_estimators':100,'learning_rate':0.7,'max_features':'auto','max_depth':9,'min_samples_leaf':7,'min_samples_split':7,'verbose':1}
+tests1,preds1=GBModel2(dtrain,dtest,gStoreTypes,params)
+#tests2,preds2=GBModel2(dtrain,dtest,gAssortment,params)
+#EnsemblePrediction()
 #ridge=RidgeCVLinear(dtrain,dtest)
