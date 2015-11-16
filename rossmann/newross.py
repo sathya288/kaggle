@@ -16,6 +16,7 @@ import seaborn as sns
 import math
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.preprocessing import Imputer
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import RidgeCV
@@ -24,6 +25,7 @@ import time
 from time import strftime
 
 gStoreTypes=['StoreType=a','StoreType=b','StoreType=c','StoreType=d']
+gStoreTypeB=['StoreType=b']
 gPromoInterval=['PromoInterval=0', 'PromoInterval=Feb,May,Aug,Nov','PromoInterval=Jan,Apr,Jul,Oct', 'PromoInterval=Mar,Jun,Sept,Dec']
 gAssortment=['Assortment=a', 'Assortment=b','Assortment=c']
 gSingle=[]
@@ -52,32 +54,34 @@ def sanitizeData(train, test,store):
   #handle NaNs, do transformations and prepare the data for further processing.
   dtrain = pd.merge(xtrain,xstore,how='inner',on='Store')
   dtest= pd.merge(xtest,xstore,how='inner',on='Store')
-  #catcols=['DayOfWeek','Promo','Store','Month','Day','Year','StoreType']
-  #catcols=['Day','Month','Year','Promo','Store']
-  #dtrain=encode_onehot(dtrain,catcols)
-  #dtest=encode_onehot(dtest,catcols)
   print('sanitizing data ... completed')
   print('feature engg ...')
   #columns to be dropped based on simple correlation
-  #catcols=['DayOfWeek','Promo','Store','Month','Day','Year','StoreType']
   #dropcols=['Promo2', 'CompetitionOpenSinceMonth', 'CompetitionOpenSinceYear','Promo2SinceWeek','Promo2SinceYear','PromoInterval','Date','Open','StateHoliday','SchoolHoliday','Assortment','CompetitionDistance']
   #The above two lines were from previous run which fetched the highest score till date. So copying here for reference.
   dtrain['IsPromo2On']=dtrain.apply(func=getPromo2,axis=1)
   dtest['IsPromo2On']=dtest.apply(func=getPromo2,axis=1)
-  dropcols=['Store','IsPromo2On','StateHoliday','SchoolHoliday','Promo2','Open','Date','CompetitionDistance']
-  traindropcols=['Sales','Customers']
+  #dtrain['SalesPerCustomer']=dtrain.apply(func=getSPC,axis=1)
+  #dropcols=['IsPromo2On','StateHoliday','SchoolHoliday','Promo2','Open','Date','CompetitionDistance']
+  dropcols=['Open','Customers']
+  traindropcols=['Sales']
   dtrain.drop(traindropcols,axis=1,inplace=True)
   dtrain.drop(dropcols,axis=1,inplace=True)
   dtest.drop(dropcols,axis=1,inplace=True)
-  dtrain.drop(gPromoInterval,axis=1,inplace=True)
-  dtest.drop(gPromoInterval,axis=1,inplace=True)
-  dtrain.drop(gAssortment,axis=1,inplace=True)
-  dtest.drop(gAssortment,axis=1,inplace=True)
+  #dtrain.drop(gPromoInterval,axis=1,inplace=True)
+  #dtest.drop(gPromoInterval,axis=1,inplace=True)
+  #dtrain.drop(gAssortment,axis=1,inplace=True)
+  #dtest.drop(gAssortment,axis=1,inplace=True)
   #dtrain.drop(gStoreTypes,axis=1,inplace=True)
   #dtest.drop(gStoreTypes,axis=1,inplace=True)
   print('feature engg ... completed')
   #return encode_onehot(dtrain,['IsPromo2On']), encode_onehot(dtest,['IsPromo2On'])
   return dtrain,dtest
+
+def getSPC(row):
+  sales=math.floor(math.exp(row['LogSales']))
+  customers=row['Customers']
+  return math.floor(sales/customers)
 
 def sanitizeInputs(train):
   print('sanitizing Training data ... ')
@@ -151,7 +155,7 @@ def getPromo2(row):
   return 0
 
 
-def GBModel2(train,test,splitcriteria,modelparams):
+def GBModel2(train,test,splitcriteria,modelclass,modelparams,playground=True):
   trains=splitModels(train,splitcriteria)
   tests=splitModels(test,splitcriteria)
   print('starting Gradient Boosting ...')
@@ -163,26 +167,38 @@ def GBModel2(train,test,splitcriteria,modelparams):
   # reference
   #GradientBoostingRegressor(n_estimators=350, max_depth=9, max_features='auto',min_samples_split=7,min_samples_leaf=7)
   for train,test,cond in zip(trains,tests,splitcriteria):
-    train.drop(splitcriteria,axis=1)
-    test.drop(splitcriteria,axis=1)
-    model=GradientBoostingRegressor()
+    model=globals()[modelclass]()
     model.set_params(**modelparams)
     trA_X=train.drop('LogSales',axis=1)
     trA_Y=train['LogSales']
     model.fit(trA_X,trA_Y)
-    preds.append(getDF(model.predict(test.drop('Id',axis=1))))
-    inp.append(test['Id'])
+    yhat=[]
+    if playground==True:
+      why=test.drop(['Id','LogSales'],axis=1)
+      yhat=model.predict(why)
+      preds.append(getDF(yhat))
+      inp.append(test[['Id'],['LogSales']])
+    else:
+      why=test.drop('Id',axis=1)
+      yhat=model.predict(why)
+      preds.append(getDF(yhat))
+      inp.append(test['Id'])
     params=model.get_params()
-    plotFeatureImportance(model,trA_X,cond)
+    #plotFeatureImportance(model,trA_X,cond)
   
   print('completed Gradient Boosting ...')
-  st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
-  fname='Inputs'+st+'.csv'
-  pd.concat(inp).to_csv(fname)
-  pd.DataFrame([train.columns]).to_csv(fname,mode='a')
-  pd.DataFrame([params]).to_csv(fname,mode='a')
-  pd.concat(preds).to_csv('Predict_'+fname)
-  return tests,preds
+  if (playground==False):
+    st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
+    fname='Inputs'+st+'.csv'
+    pd.concat(inp).to_csv(fname)
+    pd.DataFrame([train.columns]).to_csv(fname,mode='a')
+    pd.DataFrame([params]).to_csv(fname,mode='a')
+    pd.concat(preds).to_csv('Predict_'+fname)
+    return tests,preds
+  else:
+    return pd.concat(inp), pd.concat(preds)
+    #print('The RMSPE is %6f'% rmspe(pd.concat(preds),getDF(pd.concat(inp)['LogSales'])))
+
 
 def getDF(testY):
   t=[]
@@ -244,13 +260,28 @@ def plotFeatureImportance(clf,df,suffix='x'):
   plt.savefig(ffile)
   plt.clf()
 
+def prepareDiagnosticsData(dtrain):
+  #prepare validation data so that we can almost mimic leaderboard scores.
+  sts=splitModels(dtrain,gStoreTypes)
+  tests=[]
+  trains=[]
+  for st in sts:
+    cutoff=math.floor(st.index.size*0.7)
+    tests.append(st[cutoff:])
+    trains.append(st[:cutoff])
+  tst=pd.concat(tests)
+  tst['Id']=tst.index
+  return pd.concat(trains), tst
 
 train,test,store=loadData('data/train.csv.zip', 'data/test.csv.zip','data/store.csv.zip')
 dtrain,dtest=sanitizeData(train,test,store)
+#dtrain,dtest=prepareDiagnosticsData(dtrain)
 print(dtrain.columns)
 print(dtest.columns)
-params={'n_estimators':100,'learning_rate':0.7,'max_features':'auto','max_depth':9,'min_samples_leaf':7,'min_samples_split':7,'verbose':1}
-tests1,preds1=GBModel2(dtrain,dtest,gStoreTypes,params)
-#tests2,preds2=GBModel2(dtrain,dtest,gAssortment,params)
+params={'n_estimators':5,'max_features':'auto','max_depth':9,'min_samples_leaf':8,'min_samples_split':10,'verbose':1}
+gbmodel='GradientBoostingRegressor'
+rfmodel='RandomForestRegressor'
+RFparams={'n_estimators':500,'max_features':'sqrt','max_depth':9,'min_samples_leaf':7,'min_samples_split':7,'verbose':1,'n_jobs':-1}
+#GBModel2(dtrain,dtest,gStoreTypes,gbmodel,params,False)
 #EnsemblePrediction()
 #ridge=RidgeCVLinear(dtrain,dtest)
