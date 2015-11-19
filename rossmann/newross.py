@@ -28,6 +28,7 @@ gStoreTypes=['StoreType=a','StoreType=b','StoreType=c','StoreType=d']
 gStoreTypeB=['StoreType=b']
 gPromoInterval=['PromoInterval=0', 'PromoInterval=Feb,May,Aug,Nov','PromoInterval=Jan,Apr,Jul,Oct', 'PromoInterval=Mar,Jun,Sept,Dec']
 gAssortment=['Assortment=a', 'Assortment=b','Assortment=c']
+gQuarter={'Quarter':[1,2,3,4]}
 gSingle=[]
 
 def loadData(trainfile,testfile,storefile):
@@ -61,10 +62,12 @@ def sanitizeData(train, test,store):
   #The above two lines were from previous run which fetched the highest score till date. So copying here for reference.
   dtrain['IsPromo2On']=dtrain.apply(func=getPromo2,axis=1)
   dtest['IsPromo2On']=dtest.apply(func=getPromo2,axis=1)
+  dtrain['Quarter']=dtrain.apply(func=getQuarter,axis=1)
+  dtest['Quarter']=dtest.apply(func=getQuarter,axis=1)
   #dtrain['SalesPerCustomer']=dtrain.apply(func=getSPC,axis=1)
   #dropcols=['IsPromo2On','StateHoliday','SchoolHoliday','Promo2','Open','Date','CompetitionDistance']
-  dropcols=['Open','Customers']
-  traindropcols=['Sales']
+  dropcols=['Open','Date']
+  traindropcols=['Customers','Sales']
   dtrain.drop(traindropcols,axis=1,inplace=True)
   dtrain.drop(dropcols,axis=1,inplace=True)
   dtest.drop(dropcols,axis=1,inplace=True)
@@ -91,7 +94,7 @@ def sanitizeInputs(train):
   train['Year']=train['Date'].apply(lambda x:x.year)
   if 'Sales' in train.columns:
     train=train[train['Sales']>0]
-    train['LogSales']=train['Sales'].apply(lambda x:math.log(x))
+    train['LogSales']=train['Sales'].apply(lambda x:math.log(x+1))
   train['StateHoliday'].replace({'0':0,'a':1,'b':2,'c':3},inplace=True)
   print('sanitizing Training data ... completed')
   return encode_onehot(train,['DayOfWeek','Day','Month','Year','Store','SchoolHoliday','StateHoliday'])
@@ -107,7 +110,7 @@ def sanitizeStore(store):
   store['PromoInterval'].fillna('0',inplace=True)
   Imputer(missing_values='NaN',strategy='most_frequent',copy=False).fit_transform(store['CompetitionOpenSinceMonth'])
   Imputer(missing_values='NaN',strategy='most_frequent',copy=False).fit_transform(store['CompetitionOpenSinceYear'])
-  store['LogCompDist']=store['CompetitionDistance'].apply(lambda x:math.log(x))
+  store['LogCompDist']=store['CompetitionDistance'].apply(lambda x:math.log(x+1))
   store['LogCompDays']=store.apply(func=getDays,axis=1)
   print('sanitizing Store data ... completed')
   return encode_onehot(store,['Store','StoreType','Assortment','PromoInterval'])
@@ -155,7 +158,7 @@ def getPromo2(row):
   return 0
 
 
-def GBModel2(train,test,splitcriteria,modelclass,modelparams,playground=True):
+def GBModel2(train,test,splitcriteria,modelclass,modelparams):
   trains=splitModels(train,splitcriteria)
   tests=splitModels(test,splitcriteria)
   print('starting Gradient Boosting ...')
@@ -166,39 +169,29 @@ def GBModel2(train,test,splitcriteria,modelclass,modelparams,playground=True):
   inp=[]
   # reference
   #GradientBoostingRegressor(n_estimators=350, max_depth=9, max_features='auto',min_samples_split=7,min_samples_leaf=7)
-  for train,test,cond in zip(trains,tests,splitcriteria):
-    model=globals()[modelclass]()
-    model.set_params(**modelparams)
-    trA_X=train.drop('LogSales',axis=1)
-    trA_Y=train['LogSales']
-    model.fit(trA_X,trA_Y)
-    yhat=[]
-    if playground==True:
-      why=test.drop(['Id','LogSales'],axis=1)
-      yhat=model.predict(why)
-      preds.append(getDF(yhat))
-      inp.append(test[['Id'],['LogSales']])
-    else:
+  for train,test in zip(trains,tests):
+    print(test.index.size)
+    print(splitcriteria)
+    if test.index.size >0:
+      model=globals()[modelclass]()
+      model.set_params(**modelparams)
+      trA_X=train.drop('LogSales',axis=1)
+      trA_Y=train['LogSales']
+      model.fit(trA_X,trA_Y)
       why=test.drop('Id',axis=1)
       yhat=model.predict(why)
       preds.append(getDF(yhat))
       inp.append(test['Id'])
-    params=model.get_params()
-    #plotFeatureImportance(model,trA_X,cond)
+      params=model.get_params()
   
   print('completed Gradient Boosting ...')
-  if (playground==False):
-    st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
-    fname='Inputs'+st+'.csv'
-    pd.concat(inp).to_csv(fname)
-    pd.DataFrame([train.columns]).to_csv(fname,mode='a')
-    pd.DataFrame([params]).to_csv(fname,mode='a')
-    pd.concat(preds).to_csv('Predict_'+fname)
-    return tests,preds
-  else:
-    return pd.concat(inp), pd.concat(preds)
-    #print('The RMSPE is %6f'% rmspe(pd.concat(preds),getDF(pd.concat(inp)['LogSales'])))
-
+  st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
+  fname='Inputs'+st+'.csv'
+  pd.concat(inp).to_csv(fname)
+  pd.DataFrame([train.columns]).to_csv(fname,mode='a')
+  pd.DataFrame([params]).to_csv(fname,mode='a')
+  pd.concat(preds).to_csv('Predict_'+fname)
+  return tests,preds
 
 def getDF(testY):
   t=[]
@@ -240,6 +233,10 @@ def splitModels(train,cond):
   print('splitting models ...')
   if len(cond)==0:
     return [train]
+  if type(cond) is dict:
+    for key, val in zip(cond.keys(),cond.values()):
+      print([train[train[key]==i].index.size for i in val])
+      return [train[train[key]==i] for i in val]
   return [train[train[x]==1] for x in cond]
   print('splitting models ... completed')
 
@@ -273,15 +270,24 @@ def prepareDiagnosticsData(dtrain):
   tst['Id']=tst.index
   return pd.concat(trains), tst
 
+def getQuarter(row):
+  quarter={1:1,2:1,3:1,4:2,5:2,6:2,7:3,8:3,9:3,10:4,11:4,12:4}
+  return quarter[row['Month']]
+
+
 train,test,store=loadData('data/train.csv.zip', 'data/test.csv.zip','data/store.csv.zip')
 dtrain,dtest=sanitizeData(train,test,store)
 #dtrain,dtest=prepareDiagnosticsData(dtrain)
 print(dtrain.columns)
 print(dtest.columns)
-params={'n_estimators':5,'max_features':'auto','max_depth':9,'min_samples_leaf':8,'min_samples_split':10,'verbose':1}
+params={'n_estimators':500,'max_features':'auto','max_depth':9,'min_samples_leaf':8,'min_samples_split':10,'verbose':1}
+params2={'n_estimators':200,'max_features':'auto','max_depth':9,'min_samples_leaf':8,'min_samples_split':10,'verbose':1}
 gbmodel='GradientBoostingRegressor'
 rfmodel='RandomForestRegressor'
 RFparams={'n_estimators':500,'max_features':'sqrt','max_depth':9,'min_samples_leaf':7,'min_samples_split':7,'verbose':1,'n_jobs':-1}
-#GBModel2(dtrain,dtest,gStoreTypes,gbmodel,params,False)
+GBModel2(dtrain,dtest,gStoreTypes,gbmodel,params)
+GBModel2(dtrain,dtest,gPromoInterval,gbmodel,params)
+GBModel2(dtrain,dtest,gAssortment,gbmodel,params)
+GBModel2(dtrain,dtest,gQuarter,gbmodel,params)
 #EnsemblePrediction()
 #ridge=RidgeCVLinear(dtrain,dtest)
