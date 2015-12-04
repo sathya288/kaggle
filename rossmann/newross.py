@@ -21,14 +21,21 @@ from sklearn.preprocessing import Imputer
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import RidgeCV
 import zipfile
-import time 
+from time import time 
 from time import strftime
+from sklearn.grid_search import RandomizedSearchCV
+from scipy.stats import randint as sp_randint
+from operator import itemgetter
+import xgboost as xgb
+from sklearn.cross_validation import KFold
+from sklearn import cross_validation
 
 gStoreTypes=['StoreType=a','StoreType=b','StoreType=c','StoreType=d']
-gStoreTypeB=['StoreType=b']
 gPromoInterval=['PromoInterval=0', 'PromoInterval=Feb,May,Aug,Nov','PromoInterval=Jan,Apr,Jul,Oct', 'PromoInterval=Mar,Jun,Sept,Dec']
 gAssortment=['Assortment=a', 'Assortment=b','Assortment=c']
 gQuarter={'Quarter':[1,2,3,4]}
+gWeekly={'DayOfWeek':[1,2,3,4,5,6,7]}
+gMonthly={'Month':[1,2,3,4,5,6,7,8,9,10,11,12]}
 gSingle=[]
 
 def loadData(trainfile,testfile,storefile):
@@ -60,13 +67,13 @@ def sanitizeData(train, test,store):
   #columns to be dropped based on simple correlation
   #dropcols=['Promo2', 'CompetitionOpenSinceMonth', 'CompetitionOpenSinceYear','Promo2SinceWeek','Promo2SinceYear','PromoInterval','Date','Open','StateHoliday','SchoolHoliday','Assortment','CompetitionDistance']
   #The above two lines were from previous run which fetched the highest score till date. So copying here for reference.
-  dtrain['IsPromo2On']=dtrain.apply(func=getPromo2,axis=1)
-  dtest['IsPromo2On']=dtest.apply(func=getPromo2,axis=1)
+  #dtrain['IsPromo2On']=dtrain.apply(func=getPromo2,axis=1)
+  #dtest['IsPromo2On']=dtest.apply(func=getPromo2,axis=1)
   dtrain['Quarter']=dtrain.apply(func=getQuarter,axis=1)
   dtest['Quarter']=dtest.apply(func=getQuarter,axis=1)
   #dtrain['SalesPerCustomer']=dtrain.apply(func=getSPC,axis=1)
-  #dropcols=['IsPromo2On','StateHoliday','SchoolHoliday','Promo2','Open','Date','CompetitionDistance']
-  dropcols=['Open','Date']
+  dropcols=['Store','Promo2','Open','Date','CompetitionDistance','StateHoliday']
+  #dropcols=['Open','Date']
   traindropcols=['Customers','Sales']
   dtrain.drop(traindropcols,axis=1,inplace=True)
   dtrain.drop(dropcols,axis=1,inplace=True)
@@ -93,8 +100,9 @@ def sanitizeInputs(train):
   train['Month']=train['Date'].apply(lambda x:x.month)
   train['Year']=train['Date'].apply(lambda x:x.year)
   if 'Sales' in train.columns:
+    train=train[train['Open']>0]
     train=train[train['Sales']>0]
-    train['LogSales']=train['Sales'].apply(lambda x:math.log(x+1))
+    train.loc[:,'LogSales']=train['Sales'].apply(lambda x:math.log(x+1))
   train['StateHoliday'].replace({'0':0,'a':1,'b':2,'c':3},inplace=True)
   print('sanitizing Training data ... completed')
   return encode_onehot(train,['DayOfWeek','Day','Month','Year','Store','SchoolHoliday','StateHoliday'])
@@ -157,41 +165,96 @@ def getPromo2(row):
       return 1
   return 0
 
+def getTrainedModel(X,Y,model):
+  scores=cross_validation.cross_val_score(model,X,Y,scoring=myScore,cv=5,n_jobs=-1,verbose=1)
+  print('Mean RMSPE ', scores.mean())
+  return model, scores.mean()
 
-def GBModel2(train,test,splitcriteria,modelclass,modelparams):
+def myScore(clf,X,Y):
+  yhat=clf.predict(X)
+  return rmspe(yhat,Y)
+
+
+def GBModel2(train,test,splitcriteria,modelclass,modelparams,colname):
   trains=splitModels(train,splitcriteria)
   tests=splitModels(test,splitcriteria)
   print('starting Gradient Boosting ...')
-  print(splitcriteria)
   models=[]
   params=''
   preds=[]
   inp=[]
+  cond=''
   # reference
   #GradientBoostingRegressor(n_estimators=350, max_depth=9, max_features='auto',min_samples_split=7,min_samples_leaf=7)
   for train,test in zip(trains,tests):
-    print(test.index.size)
-    print(splitcriteria)
-    if test.index.size >0:
-      model=globals()[modelclass]()
+    if test.index.size >0 and train.index.size>0:
+      model=globals()[modelclass](n_estimators=500)
       model.set_params(**modelparams)
       trA_X=train.drop('LogSales',axis=1)
       trA_Y=train['LogSales']
+      model,score=getTrainedModel(trA_X,trA_Y,model)
       model.fit(trA_X,trA_Y)
       why=test.drop('Id',axis=1)
       yhat=model.predict(why)
       preds.append(getDF(yhat))
       inp.append(test['Id'])
       params=model.get_params()
-  
+    else:
+      print('Inner condition is ',cond)
+      if train.index.size==0:
+        print('No Training Data', cond)
+      if test.index.size==0:
+        print('No Test Data',cond)
+
   print('completed Gradient Boosting ...')
   st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
-  fname='Inputs'+st+'.csv'
-  pd.concat(inp).to_csv(fname)
-  pd.DataFrame([train.columns]).to_csv(fname,mode='a')
-  pd.DataFrame([params]).to_csv(fname,mode='a')
-  pd.concat(preds).to_csv('Predict_'+fname)
-  return tests,preds
+  fname1='Inputs'+ str(math.floor(1000*np.random.rand())) + st +'.csv'
+  fname2='Predict'+ str(math.floor(1000*np.random.rand())) + st +'.csv'
+  x=np.array(pd.concat(inp))
+  y=np.array(pd.concat(preds))
+  z=pd.DataFrame(x,columns=['Id'],index=np.arange(len(x)).tolist())
+  z[colname]=y
+  return z
+
+def XGBModel(train,test,splitcriteria,iters,modelparams,colname):
+  trains=splitModels(train,splitcriteria)
+  tests=splitModels(test,splitcriteria)
+  print('starting XGradient Boosting ...')
+  params=''
+  preds=[]
+  inp=[]
+  # reference
+  #GradientBoostingRegressor(n_estimators=350, max_depth=9, max_features='auto',min_samples_split=7,min_samples_leaf=7)
+  for train,test in zip(trains,tests):
+    print('XGB .. ', splitcriteria)
+    if test.index.size >0 and train.index.size>0:
+      val_idx=math.floor(0.25*train.index.size)
+      trA_X=train.drop('LogSales',axis=1)
+      trA_Y=train['LogSales']
+      xval=xgb.DMatrix(np.array(trA_X[:val_idx]), np.array(trA_Y[:val_idx]))
+      xtrain=xgb.DMatrix(np.array(trA_X[val_idx:]), np.array(trA_Y[val_idx:]))
+      watchlist=[(xval,'eval'),(xtrain,'train')]
+      gbm=xgb.train(modelparams,xtrain,iters,watchlist=watchlist,early_stopping_rounds=100,feval=rmspe)
+      why=test.drop('Id',axis=1)
+      yhat=gbm.predict(xgb.DMatrix(np.array(why)))
+      preds.append(getDF(yhat))
+      inp.append(test['Id'])
+    else:
+      print('XGB Inner condition is ')
+      if train.index.size==0:
+        print('XGB No Training Data')
+      if test.index.size==0:
+        print('XGB No Test Data')
+
+  print('completed XGradient Boosting ...')
+  st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
+  fname1='XInputs'+ str(math.floor(1000*np.random.rand())) + st +'.csv'
+  fname2='XPredict'+ str(math.floor(1000*np.random.rand())) + st +'.csv'
+  x=np.array(pd.concat(inp))
+  y=np.array(pd.concat(preds))
+  z=pd.DataFrame(x,columns=['Id'],index=np.arange(len(x)).tolist())
+  z[colname]=y
+  return z
 
 def getDF(testY):
   t=[]
@@ -274,20 +337,142 @@ def getQuarter(row):
   quarter={1:1,2:1,3:1,4:2,5:2,6:2,7:3,8:3,9:3,10:4,11:4,12:4}
   return quarter[row['Month']]
 
+def tuneHyperParams(train,splitcriteria,modelclass,param_dist,iterations):
+  trains=splitModels(train,splitcriteria)
+  print('Start tuning ... model class ', modelclass)
+  print('Split criteria is - ', splitcriteria)
+  for train in trains:
+    model=globals()[modelclass]()
+    trA_X=train.drop('LogSales',axis=1)
+    trA_Y=train['LogSales']
+    # run randomized search
+    random_search = RandomizedSearchCV(model, param_distributions=param_dist,n_iter=iterations)
+    start = time()
+    random_search.fit(trA_X, trA_Y)
+    print("RandomizedSearchCV took %.2f seconds for %d candidates"
+          " parameter settings." % ((time() - start), iterations))
+    report(random_search.grid_scores_)
+
+def NestedModels(train,test,splitcriteria,modelclass,params):
+
+  tr_Cond=splitcriteria[-1]
+  trains=splitModels(train,splitcriteria[0])
+  tests=splitModels(test,splitcriteria[0])
+  sc=''
+  if type(splitcriteria)=='dict':
+    for val in splitcriteria[1].values():
+      sc=val
+  else:
+    sc=splitcriteria[0]
+  for tr,te,cond in zip(trains,tests,sc):
+    print('Outer Split Condition', ' - ',cond)
+    if te.index.size >0:
+      GBModel2(tr,te,splitcriteria[1],modelclass,params)
+
+# Utility function to report best scores
+def report(grid_scores, n_top=3):
+  top_scores = sorted(grid_scores, key=itemgetter(1), reverse=True)[:n_top]
+  for i, score in enumerate(top_scores):
+    print("Model with rank: {0}".format(i + 1))
+    print("Mean validation score: {0:.3f} (std: {1:.3f})".format(score.mean_validation_score, np.std(score.cv_validation_scores)))
+    print("Parameters: {0}".format(score.parameters))
+    print("")
+
+def prepareValidationData(dtrain):
+  #Validation data mimics the test data. So the distribution etc are as close as possible.
+  #This is so as to get a realistic validation error.
+  #Store types are equal. PromoIntervals are equal. 
+  #Only months 8 and 9.
+  msamples=pd.concat([dtrain[dtrain['Month']==8],dtrain[dtrain['Month']==9]])
+  samples=splitModels(msamples,gStoreTypes)
+  dtest=[]
+  for sample in samples:
+    print('Test data size',sample.index.size)
+    samptest=sample.iloc[:math.floor(sample.index.size*.25)]
+    samptest['Id']=samptest.index
+    dtest.append(samptest)
+  ntest=pd.concat(dtest)
+  print('Before',dtrain.index.size)
+  dtrain=pd.DataFrame(dtrain,index=dtrain.index.difference(ntest.index))
+  print('After',dtrain.index.size)
+  return dtrain,ntest
+
+def getReducedData(dtrain,dtest):
+  #lets limit to the training data based on what is available in test - a dumbastic approach - but lets do it.
+  return dtrain[dtrain['Quarter']==3],dtest
+
+
+def getError(inp,oup,valtest):
+  res=pd.concat(inp).join(pd.concat(oup))
+  res.sort_index(inplace=True)
+  valtest.sort_index(inplace=True)
+  if res.index != valtest.index:
+    print('something went majorly wrong')
+    return -1
+  err=rmspe(res.iloc[:,-1].apply(lambda x:math.log(x)),valtest['LogSales'])
+  return err
 
 train,test,store=loadData('data/train.csv.zip', 'data/test.csv.zip','data/store.csv.zip')
 dtrain,dtest=sanitizeData(train,test,store)
 #dtrain,dtest=prepareDiagnosticsData(dtrain)
-print(dtrain.columns)
-print(dtest.columns)
-params={'n_estimators':500,'max_features':'auto','max_depth':9,'min_samples_leaf':8,'min_samples_split':10,'verbose':1}
-params2={'n_estimators':200,'max_features':'auto','max_depth':9,'min_samples_leaf':8,'min_samples_split':10,'verbose':1}
+#dtrain,dtest=getReducedData(dtrain,dtest)
+params={'n_estimators':300,'max_features':'auto','max_depth':9,'min_samples_leaf':8,'min_samples_split':8,'verbose':1,'learning_rate':0.075}
+rf_params={'n_estimators':600,'max_features':'auto','max_depth':22,'min_samples_leaf':6,'min_samples_split':6,'verbose':1,'n_jobs':-1}
+#gbmodel='RandomForestRegressor'
 gbmodel='GradientBoostingRegressor'
-rfmodel='RandomForestRegressor'
-RFparams={'n_estimators':500,'max_features':'sqrt','max_depth':9,'min_samples_leaf':7,'min_samples_split':7,'verbose':1,'n_jobs':-1}
-GBModel2(dtrain,dtest,gStoreTypes,gbmodel,params)
-GBModel2(dtrain,dtest,gPromoInterval,gbmodel,params)
-GBModel2(dtrain,dtest,gAssortment,gbmodel,params)
-GBModel2(dtrain,dtest,gQuarter,gbmodel,params)
+#gbmodel='GradientBoostingRegressor'
+#dtrain,valtest= prepareValidationData(dtrain)
+#dtest=valtest.drop('LogSales',axis=1)
+#NestedModels(dtrain,dtest,[gPromoInterval,gStoreTypes],gbmodel,params)
+
+#nosplit_params= [{'max_depth': , 'max_features': , 'learning_rate': , 'min_samples_leaf': ,'min_samples_split':}]
+st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
+fname1='GBMPredict'+ st +'.csv'
+#params=rf_params
+#res=GBModel2(dtrain,dtest,gStoreTypes,gbmodel,params,'store')
+#res=res.merge(GBModel2(dtrain,dtest,gPromoInterval,gbmodel,params,'promo'),on='Id',sort=True)
+#res=res.merge(GBModel2(dtrain,dtest,gAssortment,gbmodel,params,'assrt'),on='Id',sort=True)
+#res=res.merge(GBModel2(dtrain,dtest,gQuarter,gbmodel,params,'quart'),on='Id',sort=True)
+#res=res.merge(GBModel2(dtrain,dtest,gMonthly,gbmodel,params,'month'),on='Id',sort=True)
+#res=res.merge(GBModel2(dtrain,dtest,gWeekly,gbmodel,params,'week'),on='Id',sort=True)
+#res=res.merge(GBModel2(dtrain,dtest,gSingle,gbmodel,params,'nosp'),on='Id',sort=True)
+#res.to_csv(fname1)
+#print(getError(inp,oup,valtest))
 #EnsemblePrediction()
 #ridge=RidgeCVLinear(dtrain,dtest)
+# specify parameters and distributions to sample from
+xg_params={'max_depth':10, 'eta':0.05,'colsample_bytree':0.7,'subsample':0.9,'silent':1, 'objective':'reg:linear','booster':'gbtree'}
+iters=1700
+#xg_params={'bst:max_depth':2, 'silent':1, 'objective':'reg:linear', 'eval_metric':'rmse' }
+res=XGBModel(dtrain,dtest,gStoreTypes,iters,xg_params,'store')
+res=res.merge(XGBModel(dtrain,dtest,gPromoInterval,iters,xg_params,'promo'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gAssortment,iters,xg_params,'assrt'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gQuarter,iters,xg_params,'quart'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gMonthly,iters,xg_params,'month'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gWeekly,iters,xg_params,'week'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gSingle,iters,xg_params,'nosp'),on='Id',sort=True,suffixes=('_1','_2'))
+
+st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
+fname1='GBMPredict'+ st +'.csv'
+res.to_csv(fname1)
+
+#params_dist = {"max_depth":sp_randint(1,12), "max_features": ['log2','auto','sqrt'], "min_samples_split": sp_randint(5, 15), "min_samples_leaf": sp_randint(5, 15), "learning_rate": [0.001,0.01,0.05,0.025,0.075,0.1]}
+#itr=50
+#tuneHyperParams(dtrain,gStoreTypes,gbmodel,params_dist,itr)
+#tuneHyperParams(dtrain,gPromoInterval,gbmodel,params_dist,itr)
+#tuneHyperParams(dtrain,gAssortment,gbmodel,params_dist,itr)
+#tuneHyperParams(dtrain,gQuarter,gbmodel,params_dist,itr)
+#tuneHyperParams(dtrain,gMonthly,gbmodel,params_dist,itr)
+#tuneHyperParams(dtrain,gWeekly,gbmodel,params_dist,itr)
+#tuneHyperParams(dtrain,gSingle,gbmodel,params_dist,itr)
+storetype_params=[{'max_depth':3 , 'max_features':'auto' , 'learning_rate':0.05 , 'min_samples_leaf':8 ,'min_samples_split':5}, {'max_depth':2 , 'max_features':'log2' , 'learning_rate':0.1 , 'min_samples_leaf':13 ,'min_samples_split':10}, {'max_depth':1 , 'max_features':'sqrt' , 'learning_rate':0.075 , 'min_samples_leaf':6 ,'min_samples_split':11}, {'max_depth':10 , 'max_features':'log2' , 'learning_rate':0.025 , 'min_samples_leaf':7 ,'min_samples_split':7}]
+
+promoint_params=[ {'max_depth': 5, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 10,'min_samples_split':14 }, {'max_depth': 4, 'max_features': 'log2', 'learning_rate': 0.025, 'min_samples_leaf': 7,'min_samples_split':9 }, {'max_depth': 2, 'max_features': 'sqrt', 'learning_rate': 0.1, 'min_samples_leaf': 14,'min_samples_split':11 }, {'max_depth': 3, 'max_features': 'auto', 'learning_rate': 0.1, 'min_samples_leaf': 14,'min_samples_split':6 }]
+
+assortment_params=[ {'max_depth': 3, 'max_features': 'sqrt', 'learning_rate': 0.075, 'min_samples_leaf': 14,'min_samples_split':6 }, {'max_depth': 6, 'max_features': 'sqrt', 'learning_rate': 0.1, 'min_samples_leaf': 13,'min_samples_split':13 }, {'max_depth': 6, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 13,'min_samples_split':13 }]
+
+quarter_params= [ {'max_depth': 5, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 7,'min_samples_split':7 }, {'max_depth': 6, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 11,'min_samples_split':9 }, {'max_depth': 4, 'max_features': 'auto', 'learning_rate': 0.05, 'min_samples_leaf': 5,'min_samples_split':12 }, {'max_depth': 8, 'max_features': 'auto', 'learning_rate': 0.025, 'min_samples_leaf': 7,'min_samples_split':6 }]
+
+monthly_params= [{'max_depth': 5, 'max_features': 'log2', 'learning_rate': 0.05, 'min_samples_leaf': 11,'min_samples_split':6 }, {'max_depth': 5, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 5,'min_samples_split':8 }, {'max_depth': 4, 'max_features': 'auto', 'learning_rate': 0.05, 'min_samples_leaf': 5,'min_samples_split':9 }, {'max_depth': 6, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 6,'min_samples_split':14 }, {'max_depth': 6, 'max_features': 'log2', 'learning_rate': 0.05, 'min_samples_leaf': 10,'min_samples_split':9 }, {'max_depth': 4, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 11,'min_samples_split':9 }, {'max_depth': 5, 'max_features': 'log2', 'learning_rate': 0.05, 'min_samples_leaf': 9,'min_samples_split':6 }, {'max_depth': 5, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 9,'min_samples_split':6 }, {'max_depth': 6, 'max_features': 'auto', 'learning_rate': 0.025, 'min_samples_leaf': 11,'min_samples_split':6 }, {'max_depth': 6, 'max_features': 'log2', 'learning_rate': 0.05, 'min_samples_leaf': 8,'min_samples_split':11 }, {'max_depth': 5, 'max_features': 'log2', 'learning_rate': 0.05, 'min_samples_leaf': 5,'min_samples_split':10 }, {'max_depth': 5, 'max_features': 'auto', 'learning_rate': 0.05, 'min_samples_leaf': 8,'min_samples_split':12 }]
+                  
+weekly_params= [{'max_depth': 4, 'max_features': 'auto', 'learning_rate': 0.075, 'min_samples_leaf': 13,'min_samples_split':8 }, {'max_depth': 4, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 7,'min_samples_split':6 }, {'max_depth': 3, 'max_features': 'log2', 'learning_rate': 0.1, 'min_samples_leaf': 14,'min_samples_split':13 }, {'max_depth': 3, 'max_features': 'sqrt', 'learning_rate': 0.1, 'min_samples_leaf': 9,'min_samples_split':11 }, {'max_depth': 3, 'max_features': 'log2', 'learning_rate': 0.1, 'min_samples_leaf': 8,'min_samples_split':9 }, {'max_depth': 5, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 12,'min_samples_split':10 }, {'max_depth': 2, 'max_features': 'auto', 'learning_rate': 0.1, 'min_samples_leaf': 6,'min_samples_split':12 }]
