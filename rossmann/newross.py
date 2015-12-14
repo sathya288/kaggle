@@ -36,6 +36,8 @@ gAssortment=['Assortment=a', 'Assortment=b','Assortment=c']
 gQuarter={'Quarter':[1,2,3,4]}
 gWeekly={'DayOfWeek':[1,2,3,4,5,6,7]}
 gMonthly={'Month':[1,2,3,4,5,6,7,8,9,10,11,12]}
+gYearly={'Year':[2013,2014,2015]}
+gDay={'Day':[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]}
 gSingle=[]
 
 def loadData(trainfile,testfile,storefile):
@@ -62,6 +64,103 @@ def sanitizeData(train, test,store):
   #handle NaNs, do transformations and prepare the data for further processing.
   dtrain = pd.merge(xtrain,xstore,how='inner',on='Store')
   dtest= pd.merge(xtest,xstore,how='inner',on='Store')
+
+  perStore=dtrain.groupby('Store')
+  pStore=pd.DataFrame()
+  pStore['meanperStore']=perStore['LogSales'].mean()
+  pStore['sdperStore']=perStore['LogSales'].std()
+  pStore['Store']=pStore.index
+  pStore['salepercustomerPerStore']=perStore.apply(func=lambda row:row['LogSales']/row['LogCust'])
+  
+  #Sales per DayofYear, Month,DayofWeek,Year per Store.
+  lspdoy=pd.DataFrame()
+  lspdoy['lspdoy']=dtrain.groupby(['Store','DayOfYear'])['LogSales'].mean()
+  lspdoy['lspdoysd']=dtrain.groupby(['Store','DayOfYear'])['LogSales'].std()
+  lspdoy.reset_index(inplace=True)
+  lspdow=pd.DataFrame()
+  lspdow['lspdow']=dtrain.groupby(['Store','DayOfWeek'])['LogSales'].mean()
+  lspdow['lspdowsd']=dtrain.groupby(['Store','DayOfWeek'])['LogSales'].std()
+  lspdow.reset_index(inplace=True)
+  lspy=pd.DataFrame()
+  lspy['lspy']=dtrain.groupby(['Store','Year'])['LogSales'].mean()
+  lspy['lspysd']=dtrain.groupby(['Store','Year'])['LogSales'].std()
+  lspy.reset_index(inplace=True)
+  lspm=pd.DataFrame()
+  lspm['lspm']=dtrain.groupby(['Store','Month'])['LogSales'].mean()
+  lspm['lspmsd']=dtrain.groupby(['Store','Month'])['LogSales'].std()
+  lspm.reset_index(inplace=True)
+  
+  lcpdoy=pd.DataFrame()
+  lcpdoy['lcpdoy']=dtrain.groupby(['Store','DayOfYear'])['LogCust'].mean()
+  lcpdoy['lcpdoysd']=dtrain.groupby(['Store','DayOfYear'])['LogCust'].std()
+  lcpdoy.reset_index(inplace=True)
+  lcpdow=pd.DataFrame()
+  lcpdow['lcpdow']=dtrain.groupby(['Store','DayOfWeek'])['LogCust'].mean()
+  lcpdow['lcpdowsd']=dtrain.groupby(['Store','DayOfWeek'])['LogCust'].std()
+  lcpdow.reset_index(inplace=True)
+  lcpy=pd.DataFrame()
+  lcpy['lcpy']=dtrain.groupby(['Store','Year'])['LogCust'].mean()
+  lcpy['lcpysd']=dtrain.groupby(['Store','Year'])['LogCust'].std()
+  lcpy.reset_index(inplace=True)
+  lcpm=pd.DataFrame()
+  lcpm['lcpm']=dtrain.groupby(['Store','Month'])['LogCust'].mean()
+  lcpm['lcpmsd']=dtrain.groupby(['Store','Month'])['LogCust'].std()
+  lcpm.reset_index(inplace=True)
+
+  #merge these newly calculated perStore statistics
+  dtrain = pd.merge(dtrain,pStore,how='inner',on='Store')
+  dtrain = pd.merge(dtrain,lspdoy,how='left',on=['Store','DayOfYear'])
+  dtrain = pd.merge(dtrain,lspdow,how='left',on=['Store','DayOfWeek'])
+  dtrain = pd.merge(dtrain,lspy,how='left',on=['Store','Year'])
+  dtrain = pd.merge(dtrain,lspm,how='left',on=['Store','Month'])
+  dtrain = pd.merge(dtrain,lcpdoy,how='left',on=['Store','DayOfYear'])
+  dtrain = pd.merge(dtrain,lcpdow,how='left',on=['Store','DayOfWeek'])
+  dtrain = pd.merge(dtrain,lcpy,how='left',on=['Store','Year'])
+  dtrain = pd.merge(dtrain,lcpm,how='left',on=['Store','Month'])
+  dtrain['lspdoy'].fillna(0,inplace=True)
+  dtrain['lspdoysd'].fillna(0,inplace=True)
+  dtrain['lspdow'].fillna(0,inplace=True)
+  dtrain['lspdowsd'].fillna(0,inplace=True)
+  dtrain['lspy'].fillna(0,inplace=True)
+  dtrain['lspysd'].fillna(0,inplace=True)
+  dtrain['lspm'].fillna(0,inplace=True)
+  dtrain['lspmsd'].fillna(0,inplace=True)
+  dtrain['lcpdoy'].fillna(0,inplace=True)
+  dtrain['lcpdoysd'].fillna(0,inplace=True)
+  dtrain['lcpdow'].fillna(0,inplace=True)
+  dtrain['lcpdowsd'].fillna(0,inplace=True)
+  dtrain['lcpy'].fillna(0,inplace=True)
+  dtrain['lcpysd'].fillna(0,inplace=True)
+  dtrain['lcpm'].fillna(0,inplace=True)
+  dtrain['lcpmsd'].fillna(0,inplace=True)
+  
+  dtest= pd.merge(dtest,pStore,how='inner',on='Store')
+  dtest = pd.merge(dtest,lspdoy,how='left',on=['Store','DayOfYear'])
+  dtest = pd.merge(dtest,lspdow,how='left',on=['Store','DayOfWeek'])
+  dtest = pd.merge(dtest,lspy,how='left',on=['Store','Year'])
+  dtest = pd.merge(dtest,lspm,how='left',on=['Store','Month'])
+  dtest = pd.merge(dtest,lcpdoy,how='left',on=['Store','DayOfYear'])
+  dtest = pd.merge(dtest,lcpdow,how='left',on=['Store','DayOfWeek'])
+  dtest = pd.merge(dtest,lcpy,how='left',on=['Store','Year'])
+  dtest = pd.merge(dtest,lcpm,how='left',on=['Store','Month'])
+
+  dtest['lspdoy'].fillna(0,inplace=True)
+  dtest['lspdoysd'].fillna(0,inplace=True)
+  dtest['lspdow'].fillna(0,inplace=True)
+  dtest['lspdowsd'].fillna(0,inplace=True)
+  dtest['lspy'].fillna(0,inplace=True)
+  dtest['lspysd'].fillna(0,inplace=True)
+  dtest['lspm'].fillna(0,inplace=True)
+  dtest['lspmsd'].fillna(0,inplace=True)
+  dtest['lcpdoy'].fillna(0,inplace=True)
+  dtest['lcpdoysd'].fillna(0,inplace=True)
+  dtest['lcpdow'].fillna(0,inplace=True)
+  dtest['lcpdowsd'].fillna(0,inplace=True)
+  dtest['lcpy'].fillna(0,inplace=True)
+  dtest['lcpysd'].fillna(0,inplace=True)
+  dtest['lcpm'].fillna(0,inplace=True)
+  dtest['lcpmsd'].fillna(0,inplace=True)
+
   print('sanitizing data ... completed')
   print('feature engg ...')
   #columns to be dropped based on simple correlation
@@ -72,16 +171,17 @@ def sanitizeData(train, test,store):
   dtrain['Quarter']=dtrain.apply(func=getQuarter,axis=1)
   dtest['Quarter']=dtest.apply(func=getQuarter,axis=1)
   #dtrain['SalesPerCustomer']=dtrain.apply(func=getSPC,axis=1)
-  dropcols=['Store','Promo2','Open','Date','CompetitionDistance','StateHoliday']
   #dropcols=['Open','Date']
-  traindropcols=['Customers','Sales']
+  #dropcols=['Promo2', 'CompetitionOpenSinceMonth', 'CompetitionOpenSinceYear','Promo2SinceWeek','Promo2SinceYear','Date','Open','StateHoliday','SchoolHoliday','CompetitionDistance']
+  dropcols=['Promo2', 'CompetitionOpenSinceMonth', 'CompetitionOpenSinceYear','Promo2SinceWeek','Promo2SinceYear','Date','Open','StateHoliday','SchoolHoliday','CompetitionDistance']
+  traindropcols=['Sales','Customers']
   dtrain.drop(traindropcols,axis=1,inplace=True)
   dtrain.drop(dropcols,axis=1,inplace=True)
   dtest.drop(dropcols,axis=1,inplace=True)
-  #dtrain.drop(gPromoInterval,axis=1,inplace=True)
-  #dtest.drop(gPromoInterval,axis=1,inplace=True)
-  #dtrain.drop(gAssortment,axis=1,inplace=True)
-  #dtest.drop(gAssortment,axis=1,inplace=True)
+  dtrain.drop(gPromoInterval,axis=1,inplace=True)
+  dtest.drop(gPromoInterval,axis=1,inplace=True)
+  dtrain.drop(gAssortment,axis=1,inplace=True)
+  dtest.drop(gAssortment,axis=1,inplace=True)
   #dtrain.drop(gStoreTypes,axis=1,inplace=True)
   #dtest.drop(gStoreTypes,axis=1,inplace=True)
   print('feature engg ... completed')
@@ -99,10 +199,12 @@ def sanitizeInputs(train):
   train['Day']=train['Date'].apply(lambda x:x.day)
   train['Month']=train['Date'].apply(lambda x:x.month)
   train['Year']=train['Date'].apply(lambda x:x.year)
+  train['DayOfYear']=train['Date'].apply(lambda x:x.dayofyear)
   if 'Sales' in train.columns:
     train=train[train['Open']>0]
     train=train[train['Sales']>0]
-    train.loc[:,'LogSales']=train['Sales'].apply(lambda x:math.log(x+1))
+    train.loc[:,'LogSales']=train['Sales'].apply(lambda x:1000*math.log(x+1))
+    train.loc[:,'LogCust']=train['Customers'].apply(lambda x:100*math.log(x+1))
   train['StateHoliday'].replace({'0':0,'a':1,'b':2,'c':3},inplace=True)
   print('sanitizing Training data ... completed')
   return encode_onehot(train,['DayOfWeek','Day','Month','Year','Store','SchoolHoliday','StateHoliday'])
@@ -176,6 +278,7 @@ def myScore(clf,X,Y):
 
 
 def GBModel2(train,test,splitcriteria,modelclass,modelparams,colname):
+  train=train.drop('LogCust',axis=1)
   trains=splitModels(train,splitcriteria)
   tests=splitModels(test,splitcriteria)
   print('starting Gradient Boosting ...')
@@ -216,7 +319,11 @@ def GBModel2(train,test,splitcriteria,modelclass,modelparams,colname):
   z[colname]=y
   return z
 
+def MultiGBModel2(dtrain,dtest,gDay,gbmodel,params,stuff,que):
+  que.put(GBModel2(dtrain,dtest,gDay,gbmodel,params,stuff))
+
 def XGBModel(train,test,splitcriteria,iters,modelparams,colname):
+  train=train.drop('LogCust',axis=1)
   trains=splitModels(train,splitcriteria)
   tests=splitModels(test,splitcriteria)
   print('starting XGradient Boosting ...')
@@ -228,13 +335,14 @@ def XGBModel(train,test,splitcriteria,iters,modelparams,colname):
   for train,test in zip(trains,tests):
     print('XGB .. ', splitcriteria)
     if test.index.size >0 and train.index.size>0:
-      val_idx=math.floor(0.25*train.index.size)
+      val_idx=math.floor(0.2*train.index.size)
       trA_X=train.drop('LogSales',axis=1)
       trA_Y=train['LogSales']
       xval=xgb.DMatrix(np.array(trA_X[:val_idx]), np.array(trA_Y[:val_idx]))
       xtrain=xgb.DMatrix(np.array(trA_X[val_idx:]), np.array(trA_Y[val_idx:]))
       watchlist=[(xval,'eval'),(xtrain,'train')]
-      gbm=xgb.train(modelparams,xtrain,iters,watchlist=watchlist,early_stopping_rounds=100,feval=rmspe)
+      xtrain2=xgb.DMatrix(np.array(trA_X), np.array(trA_Y))
+      gbm=xgb.train(modelparams,xtrain,iters,feval=rmspe_xg)
       why=test.drop('Id',axis=1)
       yhat=gbm.predict(xgb.DMatrix(np.array(why)))
       preds.append(getDF(yhat))
@@ -259,7 +367,7 @@ def XGBModel(train,test,splitcriteria,iters,modelparams,colname):
 def getDF(testY):
   t=[]
   for y in testY:
-    t.append(math.exp(y))
+    t.append(math.exp(y/1000)-1)
   return pd.DataFrame(t)
 
 # Thanks to Chenglong Chen for providing this in the forum
@@ -273,6 +381,15 @@ def rmspe(yhat, y):
   w = ToWeight(y)
   mspe = np.sqrt(np.mean( w * (y - yhat)**2 ))
   return mspe
+
+def rmspe_xg(yhat, y):
+  # y = y.values
+  y = y.get_label()
+  y = np.exp(y) - 1
+  yhat = np.exp(yhat) - 1
+  w = ToWeight(y)
+  mspe = np.sqrt(np.mean(w * (y - yhat)**2))
+  return "rmspe", mspe
 
 
 def RidgeCVLinear(train,test):
@@ -299,8 +416,8 @@ def splitModels(train,cond):
   if type(cond) is dict:
     for key, val in zip(cond.keys(),cond.values()):
       print([train[train[key]==i].index.size for i in val])
-      return [train[train[key]==i] for i in val]
-  return [train[train[x]==1] for x in cond]
+      return [train[train[key]==i].drop(key,axis=1)for i in val]
+  return [train[train[x]==1].drop(x,axis=1) for x in cond]
   print('splitting models ... completed')
 
 def plotFeatureImportance(clf,df,suffix='x'):
@@ -412,12 +529,25 @@ def getError(inp,oup,valtest):
   err=rmspe(res.iloc[:,-1].apply(lambda x:math.log(x)),valtest['LogSales'])
   return err
 
+'''
 train,test,store=loadData('data/train.csv.zip', 'data/test.csv.zip','data/store.csv.zip')
 dtrain,dtest=sanitizeData(train,test,store)
+#Let us persist the data so that we can quickly start the next time
+dtrain.to_csv('prepTrain.csv')
+dtest.to_csv('prepTest.csv')
+print('before exit')
+exit
+print('after exit')
+'''
+#load from preps
+dtrain=pd.read_csv(open('prepTrain.csv'))
+dtest=pd.read_csv(open('prepTest.csv'))
+
 #dtrain,dtest=prepareDiagnosticsData(dtrain)
 #dtrain,dtest=getReducedData(dtrain,dtest)
-params={'n_estimators':300,'max_features':'auto','max_depth':9,'min_samples_leaf':8,'min_samples_split':8,'verbose':1,'learning_rate':0.075}
-rf_params={'n_estimators':600,'max_features':'auto','max_depth':22,'min_samples_leaf':6,'min_samples_split':6,'verbose':1,'n_jobs':-1}
+params={'n_estimators':700,'max_features':'sqrt','max_depth':11,'min_samples_leaf':8,'min_samples_split':8,'verbose':0,'learning_rate':0.08}
+#params={'n_estimators':3,'max_features':'auto','max_depth':9,'min_samples_leaf':8,'min_samples_split':8,'verbose':1,'learning_rate':0.075}
+#rf_params={'n_estimators':600,'max_features':'auto','max_depth':22,'min_samples_leaf':6,'min_samples_split':6,'verbose':1,'n_jobs':-1}
 #gbmodel='RandomForestRegressor'
 gbmodel='GradientBoostingRegressor'
 #gbmodel='GradientBoostingRegressor'
@@ -426,36 +556,42 @@ gbmodel='GradientBoostingRegressor'
 #NestedModels(dtrain,dtest,[gPromoInterval,gStoreTypes],gbmodel,params)
 
 #nosplit_params= [{'max_depth': , 'max_features': , 'learning_rate': , 'min_samples_leaf': ,'min_samples_split':}]
-st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
-fname1='GBMPredict'+ st +'.csv'
 #params=rf_params
-#res=GBModel2(dtrain,dtest,gStoreTypes,gbmodel,params,'store')
-#res=res.merge(GBModel2(dtrain,dtest,gPromoInterval,gbmodel,params,'promo'),on='Id',sort=True)
-#res=res.merge(GBModel2(dtrain,dtest,gAssortment,gbmodel,params,'assrt'),on='Id',sort=True)
+res=GBModel2(dtrain,dtest,gSingle,gbmodel,params,'nosp')
+res=res.merge(GBModel2(dtrain,dtest,gDay,gbmodel,params,'day'),on='Id',sort=True)
 #res=res.merge(GBModel2(dtrain,dtest,gQuarter,gbmodel,params,'quart'),on='Id',sort=True)
 #res=res.merge(GBModel2(dtrain,dtest,gMonthly,gbmodel,params,'month'),on='Id',sort=True)
-#res=res.merge(GBModel2(dtrain,dtest,gWeekly,gbmodel,params,'week'),on='Id',sort=True)
-#res=res.merge(GBModel2(dtrain,dtest,gSingle,gbmodel,params,'nosp'),on='Id',sort=True)
-#res.to_csv(fname1)
-#print(getError(inp,oup,valtest))
-#EnsemblePrediction()
-#ridge=RidgeCVLinear(dtrain,dtest)
-# specify parameters and distributions to sample from
-xg_params={'max_depth':10, 'eta':0.05,'colsample_bytree':0.7,'subsample':0.9,'silent':1, 'objective':'reg:linear','booster':'gbtree'}
-iters=1700
-#xg_params={'bst:max_depth':2, 'silent':1, 'objective':'reg:linear', 'eval_metric':'rmse' }
-res=XGBModel(dtrain,dtest,gStoreTypes,iters,xg_params,'store')
-res=res.merge(XGBModel(dtrain,dtest,gPromoInterval,iters,xg_params,'promo'),on='Id',sort=True,suffixes=('_1','_2'))
-res=res.merge(XGBModel(dtrain,dtest,gAssortment,iters,xg_params,'assrt'),on='Id',sort=True,suffixes=('_1','_2'))
-res=res.merge(XGBModel(dtrain,dtest,gQuarter,iters,xg_params,'quart'),on='Id',sort=True,suffixes=('_1','_2'))
-res=res.merge(XGBModel(dtrain,dtest,gMonthly,iters,xg_params,'month'),on='Id',sort=True,suffixes=('_1','_2'))
-res=res.merge(XGBModel(dtrain,dtest,gWeekly,iters,xg_params,'week'),on='Id',sort=True,suffixes=('_1','_2'))
-res=res.merge(XGBModel(dtrain,dtest,gSingle,iters,xg_params,'nosp'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(GBModel2(dtrain,dtest,gWeekly,gbmodel,params,'week'),on='Id',sort=True)
+#res=res.merge(GBModel2(dtrain,dtest,gYearly,gbmodel,params,'year'),on='Id',sort=True)
+res=res.merge(GBModel2(dtrain,dtest,gStoreTypes,gbmodel,params,'store'),on='Id',sort=True)
+#res=res.merge(GBModel2(dtrain,dtest,gPromoInterval,gbmodel,params,'promo'),on='Id',sort=True)
+#res=res.merge(GBModel2(dtrain,dtest,gAssortment,gbmodel,params,'assort'),on='Id',sort=True)
 
 st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
 fname1='GBMPredict'+ st +'.csv'
 res.to_csv(fname1)
-
+#print(getError(inp,oup,valtest))
+#EnsemblePrediction()
+#ridge=RidgeCVLinear(dtrain,dtest)
+# specify parameters and distributions to sample from
+'''
+xg_params={'max_depth':10, 'eta':0.1,'colsample_bytree':0.8,'subsample':0.7,'silent':2, 'objective':'reg:linear','booster':'gbtree','eval_metric':'rmse'}
+iters=2400
+res=XGBModel(dtrain,dtest,gSingle,iters,xg_params,'nosp')
+'''
+'''
+res=res.merge(XGBModel(dtrain,dtest,gDay,iters,xg_params,'day'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gQuarter,iters,xg_params,'quart'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gMonthly,iters,xg_params,'month'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gWeekly,iters,xg_params,'week'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gYearly,iters,xg_params,'year'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gStoreTypes,iters,xg_params,'store'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gPromoInterval,iters,xg_params,'promo'),on='Id',sort=True,suffixes=('_1','_2'))
+res=res.merge(XGBModel(dtrain,dtest,gAssortment,iters,xg_params,'assort'),on='Id',sort=True,suffixes=('_1','_2'))
+st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
+fname1='XGB_Predict'+ st +'.csv'
+res.to_csv(fname1)
+'''
 #params_dist = {"max_depth":sp_randint(1,12), "max_features": ['log2','auto','sqrt'], "min_samples_split": sp_randint(5, 15), "min_samples_leaf": sp_randint(5, 15), "learning_rate": [0.001,0.01,0.05,0.025,0.075,0.1]}
 #itr=50
 #tuneHyperParams(dtrain,gStoreTypes,gbmodel,params_dist,itr)
@@ -474,5 +610,4 @@ assortment_params=[ {'max_depth': 3, 'max_features': 'sqrt', 'learning_rate': 0.
 quarter_params= [ {'max_depth': 5, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 7,'min_samples_split':7 }, {'max_depth': 6, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 11,'min_samples_split':9 }, {'max_depth': 4, 'max_features': 'auto', 'learning_rate': 0.05, 'min_samples_leaf': 5,'min_samples_split':12 }, {'max_depth': 8, 'max_features': 'auto', 'learning_rate': 0.025, 'min_samples_leaf': 7,'min_samples_split':6 }]
 
 monthly_params= [{'max_depth': 5, 'max_features': 'log2', 'learning_rate': 0.05, 'min_samples_leaf': 11,'min_samples_split':6 }, {'max_depth': 5, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 5,'min_samples_split':8 }, {'max_depth': 4, 'max_features': 'auto', 'learning_rate': 0.05, 'min_samples_leaf': 5,'min_samples_split':9 }, {'max_depth': 6, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 6,'min_samples_split':14 }, {'max_depth': 6, 'max_features': 'log2', 'learning_rate': 0.05, 'min_samples_leaf': 10,'min_samples_split':9 }, {'max_depth': 4, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 11,'min_samples_split':9 }, {'max_depth': 5, 'max_features': 'log2', 'learning_rate': 0.05, 'min_samples_leaf': 9,'min_samples_split':6 }, {'max_depth': 5, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 9,'min_samples_split':6 }, {'max_depth': 6, 'max_features': 'auto', 'learning_rate': 0.025, 'min_samples_leaf': 11,'min_samples_split':6 }, {'max_depth': 6, 'max_features': 'log2', 'learning_rate': 0.05, 'min_samples_leaf': 8,'min_samples_split':11 }, {'max_depth': 5, 'max_features': 'log2', 'learning_rate': 0.05, 'min_samples_leaf': 5,'min_samples_split':10 }, {'max_depth': 5, 'max_features': 'auto', 'learning_rate': 0.05, 'min_samples_leaf': 8,'min_samples_split':12 }]
-                  
 weekly_params= [{'max_depth': 4, 'max_features': 'auto', 'learning_rate': 0.075, 'min_samples_leaf': 13,'min_samples_split':8 }, {'max_depth': 4, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 7,'min_samples_split':6 }, {'max_depth': 3, 'max_features': 'log2', 'learning_rate': 0.1, 'min_samples_leaf': 14,'min_samples_split':13 }, {'max_depth': 3, 'max_features': 'sqrt', 'learning_rate': 0.1, 'min_samples_leaf': 9,'min_samples_split':11 }, {'max_depth': 3, 'max_features': 'log2', 'learning_rate': 0.1, 'min_samples_leaf': 8,'min_samples_split':9 }, {'max_depth': 5, 'max_features': 'sqrt', 'learning_rate': 0.05, 'min_samples_leaf': 12,'min_samples_split':10 }, {'max_depth': 2, 'max_features': 'auto', 'learning_rate': 0.1, 'min_samples_leaf': 6,'min_samples_split':12 }]
