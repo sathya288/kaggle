@@ -51,14 +51,10 @@ def sanitizeData(train):
   train['Month']=train['Original_Quote_Date'].apply(lambda x: x.month)
   train['Day']=train['Original_Quote_Date'].apply(lambda x: x.day)
   train['DayOfWeek']=train['Original_Quote_Date'].apply(lambda x:x.dayofweek)
-  #This field has max/min ration greater than 1000. So lets take the log values
+  train['DayOfYear']=train['Original_Quote_Date'].apply(lambda x:x.dayofyear)
+  #This field has max/min ratio greater than 1000. So lets take the log values
   train['LogSalesField8']=train['SalesField8'].apply(lambda x:math.log(x))
   train.drop(['Original_Quote_Date','SalesField8'],axis=1,inplace=True)
-  #let us vectorize all the object types.
-  columns=[]
-  for label in train.columns:
-    if train[label].dtype=='object':
-      columns.append(label)
   train= ImputeValues(train)
   return train
   #this is the best we could do.
@@ -75,33 +71,6 @@ def ImputeValues(train):
   #Refer also to https://www.kaggle.com/c/homesite-quote-conversion/forums/t/17417/missing-values
   train.fillna(-1,inplace=True)
   return train
-
-
-def encode_onehot(df, cols):
-  """
-    One-hot encoding is applied to columns specified in a pandas DataFrame.
-
-    Modified from: https://gist.github.com/kljensen/5452382
-
-    Details:
-
-    http://en.wikipedia.org/wiki/One-hot
-    http://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.OneHotEncoder.html
-
-    @param df pandas DataFrame
-    @param cols a list of columns to encode
-    @return a DataFrame with one-hot encoding
-  """
-  print('encoding categorical data ...')
-  vec = DictVectorizer()
-  vec_data = pd.DataFrame(vec.fit_transform(df[cols].to_dict(orient='records')).toarray())
-  vec_data.columns = vec.get_feature_names()
-  vec_data.index = df.index
-
-  df = df.drop(cols, axis=1)
-  df = df.join(vec_data)
-  print('Completed encoding categorical data ...')
-  return df
 
 def encode_labels(train,test):
   for f in train.columns:
@@ -219,11 +188,35 @@ def report(grid_scores, n_top=3):
     print("Parameters: {0}".format(score.parameters))
     print("")
 
+#split features based on the category
+def splitCategories(columns):
+  covmodel=[]
+  salesmodel=[]
+  persmodel=[]
+  propmodel=[]
+  geomodel=[]
+  genmodel=[]
+  for col in colsT:
+    lead=col[:4]
+    if lead=='Cove':
+      covmodel.append(col)
+    elif lead=='Sale':
+      salesmodel.append(col)
+    elif lead=='Pers':
+      persmodel.append(col)
+    elif lead=='Prop':
+      propmodel.append(col)
+    elif lead=='Geog':
+      geomodel.append(col)
+    else:
+      genmodel.append(col)
+  return covmodel,salesmodel,persmodel,propmodel,geomodel,genmodel
+
+
 train,test=loadData(trainfile,testfile)
 train.drop('QuoteNumber',axis=1,inplace=True)
 dtrain=sanitizeData(train)
 dtest=sanitizeData(test)
-'''
 dtrain,dtest=encode_labels(dtrain,dtest)
 print('get reduced set')
 #dtrain=getReducedSet(dtrain,keyTrainCols)
@@ -247,4 +240,3 @@ iters=3
 
 res=XGBModelXY(dtrain,dtest,gNoSplit,xg_params,iters)
 #tuneHyperParams(dtrain,'GradientBoostingClassifier',params_dist,itr)
-'''
