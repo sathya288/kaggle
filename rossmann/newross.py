@@ -178,10 +178,10 @@ def sanitizeData(train, test,store):
   dtrain.drop(traindropcols,axis=1,inplace=True)
   dtrain.drop(dropcols,axis=1,inplace=True)
   dtest.drop(dropcols,axis=1,inplace=True)
-  dtrain.drop(gPromoInterval,axis=1,inplace=True)
-  dtest.drop(gPromoInterval,axis=1,inplace=True)
-  dtrain.drop(gAssortment,axis=1,inplace=True)
-  dtest.drop(gAssortment,axis=1,inplace=True)
+  #dtrain.drop(gPromoInterval,axis=1,inplace=True)
+  #dtest.drop(gPromoInterval,axis=1,inplace=True)
+  #dtrain.drop(gAssortment,axis=1,inplace=True)
+  #dtest.drop(gAssortment,axis=1,inplace=True)
   #dtrain.drop(gStoreTypes,axis=1,inplace=True)
   #dtest.drop(gStoreTypes,axis=1,inplace=True)
   print('feature engg ... completed')
@@ -291,11 +291,11 @@ def GBModel2(train,test,splitcriteria,modelclass,modelparams,colname):
   #GradientBoostingRegressor(n_estimators=350, max_depth=9, max_features='auto',min_samples_split=7,min_samples_leaf=7)
   for train,test in zip(trains,tests):
     if test.index.size >0 and train.index.size>0:
-      model=globals()[modelclass](n_estimators=500)
+      model=globals()[modelclass]()
       model.set_params(**modelparams)
       trA_X=train.drop('LogSales',axis=1)
       trA_Y=train['LogSales']
-      model,score=getTrainedModel(trA_X,trA_Y,model)
+      #model,score=getTrainedModel(trA_X,trA_Y,model)
       model.fit(trA_X,trA_Y)
       why=test.drop('Id',axis=1)
       yhat=model.predict(why)
@@ -331,7 +331,6 @@ def XGBModel(train,test,splitcriteria,iters,modelparams,colname):
   preds=[]
   inp=[]
   # reference
-  #GradientBoostingRegressor(n_estimators=350, max_depth=9, max_features='auto',min_samples_split=7,min_samples_leaf=7)
   for train,test in zip(trains,tests):
     print('XGB .. ', splitcriteria)
     if test.index.size >0 and train.index.size>0:
@@ -545,8 +544,6 @@ dtest=pd.read_csv(open('prepTest.csv'))
 
 #dtrain,dtest=prepareDiagnosticsData(dtrain)
 #dtrain,dtest=getReducedData(dtrain,dtest)
-params={'n_estimators':700,'max_features':'sqrt','max_depth':11,'min_samples_leaf':8,'min_samples_split':8,'verbose':0,'learning_rate':0.08}
-#params={'n_estimators':3,'max_features':'auto','max_depth':9,'min_samples_leaf':8,'min_samples_split':8,'verbose':1,'learning_rate':0.075}
 #rf_params={'n_estimators':600,'max_features':'auto','max_depth':22,'min_samples_leaf':6,'min_samples_split':6,'verbose':1,'n_jobs':-1}
 #gbmodel='RandomForestRegressor'
 gbmodel='GradientBoostingRegressor'
@@ -555,17 +552,17 @@ gbmodel='GradientBoostingRegressor'
 #dtest=valtest.drop('LogSales',axis=1)
 #NestedModels(dtrain,dtest,[gPromoInterval,gStoreTypes],gbmodel,params)
 
-#nosplit_params= [{'max_depth': , 'max_features': , 'learning_rate': , 'min_samples_leaf': ,'min_samples_split':}]
-#params=rf_params
-res=GBModel2(dtrain,dtest,gSingle,gbmodel,params,'nosp')
-res=res.merge(GBModel2(dtrain,dtest,gDay,gbmodel,params,'day'),on='Id',sort=True)
+#res=GBModel2(dtrain,dtest,gSingle,gbmodel,params,'nosp')
+#res=res.merge(GBModel2(dtrain,dtest,gDay,gbmodel,params,'day'),on='Id',sort=True)
 #res=res.merge(GBModel2(dtrain,dtest,gQuarter,gbmodel,params,'quart'),on='Id',sort=True)
+params={'n_estimators':600,'max_features':'auto','max_depth':9,'min_samples_leaf':8,'min_samples_split':10,'verbose':0}
+res=GBModel2(dtrain,dtest,gQuarter,gbmodel,params,'quart')
 #res=res.merge(GBModel2(dtrain,dtest,gMonthly,gbmodel,params,'month'),on='Id',sort=True)
 res=res.merge(GBModel2(dtrain,dtest,gWeekly,gbmodel,params,'week'),on='Id',sort=True)
 #res=res.merge(GBModel2(dtrain,dtest,gYearly,gbmodel,params,'year'),on='Id',sort=True)
 res=res.merge(GBModel2(dtrain,dtest,gStoreTypes,gbmodel,params,'store'),on='Id',sort=True)
 #res=res.merge(GBModel2(dtrain,dtest,gPromoInterval,gbmodel,params,'promo'),on='Id',sort=True)
-#res=res.merge(GBModel2(dtrain,dtest,gAssortment,gbmodel,params,'assort'),on='Id',sort=True)
+res=res.merge(GBModel2(dtrain,dtest,gAssortment,gbmodel,params,'assort'),on='Id',sort=True)
 
 st=strftime("%a, %d %b %Y %H:%M:%S").translate(str.maketrans(' :,','___'))
 fname1='GBMPredict'+ st +'.csv'
